@@ -17,6 +17,7 @@ void print_board(const Game *game);
 int sow(Game *game, int hole_index);
 int has_legal_move(const Game *game);
 void finish_game(Game *game);
-int check_game_over(Game *game)
+int check_game_over(Game *game);
+int can_feed_opponent(const Game *game, int hole_index);
 
 #endif
