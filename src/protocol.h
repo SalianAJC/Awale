@@ -74,3 +74,16 @@ Player Struct :
     char bio[10] (imposed by the teacher)
     games arr[]
 */
+
+
+
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
+
+#define SERVER_PORT 5050
+#define MAX_NAME 32
+#define MAX_MESSAGE 512
+
+#endif
+
+
