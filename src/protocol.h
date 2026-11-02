@@ -77,13 +77,27 @@ Player Struct :
 
 
 
+
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#define SERVER_PORT 5050
-#define MAX_NAME 32
-#define MAX_MESSAGE 512
+#include <winsock2.h>
+#include <stdint.h>
+
+#define SERVER_PORT 8080 //Given port
+#define MAX_NAME 32 //Maximum length of the username
+#define MAX_MESSAGE 200 //Maximum length of the message content, arbitrary
+#define MAX_TYPE 3 //Maximum length of the message type, arbitrary. We actually use 2 tops
+
+typedef struct {
+    char type[MAX_TYPE];
+    char content[MAX_MESSAGE + 1]; // We include 0
+    int32_t receiver; // The player_id of the receiver, or -1 if not applicable
+    char response; // S - success, F - fail, etc.
+    char mode;// O - observer, P - player
+} Message;
+
+int send_message(SOCKET socket, const Message *message);
+int receive_message(SOCKET socket, Message *message);
 
 #endif
-
-
