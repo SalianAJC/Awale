@@ -9,18 +9,32 @@ Message Types:
 R : Register
 L : login
 M : message chat (limiting to 200 characters. Why 200?)
-C : choose Player (wait, if B accepts. Start game. B rejects, end game)
+C : choose Player (wait, if B accepts. Start game. B rejects, no game)
+O : observe (so also keep a list of all ongoing games)
+W : write a bio
+R : review game
 
 Final
 Message :
-    Struct :
-        Type : character
+    Struct messageClient :
+        Type : string
         Content : 200 bytes - String
         (Receiver : other player ?)
-        Response : character 
+        Response : char (S - success / F - fail...etc) 
+        Mode : char - (O : observer - P : player)
 
 */
 
+
+/*
+    Struct messageServer :
+        Type : string
+        Content : 200 bytes - String
+        (Receiver : other player ?)
+        Response : char (S - success / F - fail...etc) 
+        Mode : char - (O : observer - P : player)
+
+*/
 
 /*
 Server --> Player B :
@@ -34,6 +48,8 @@ L : login failed
 M : Send the chat message
 
 S : show players online (array of players ?)
+
+Sh : show historic game (Filter by user's games or list overall recent games. Using a hashmap)
 */
 
 /*
@@ -45,4 +61,16 @@ Questions :
     - What operations happen where ? (Client or server)
     Checking legal moves (on the client)
     ....what else ?
+*/
+
+
+/*
+Player Struct :
+    Already exist
+    int player_id
+    char username[MAX_NAME]
+
+    to add
+    char bio[10] (imposed by the teacher)
+    games arr[]
 */
