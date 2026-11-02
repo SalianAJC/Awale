@@ -5,6 +5,7 @@
 #define GAME_H
 
 typedef struct {
+    int id; // Unique identifier for the game
     int holes[12]; // 12 holes, 6 on either side
     int captures [2]; 
 

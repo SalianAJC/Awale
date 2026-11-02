@@ -4,6 +4,7 @@
 #include "game.h"
 
 void init_game(Game *game) {
+    game->id = -1;
     for (int i = 0; i < 12; i++) {
         game->holes[i] = 4; // Each hole starts with 4 seeds
     }

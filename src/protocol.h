@@ -12,7 +12,7 @@ M : message chat (limiting to 200 characters. Why 200?)
 C : choose Player (wait, if B accepts. Start game. B rejects, no game)
 O : observe (so also keep a list of all ongoing games)
 W : write a bio
-R : review game
+RG : review game
 
 Final
 Message :
