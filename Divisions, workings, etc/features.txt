@@ -1,4 +1,4 @@
-1. Make it playable
+1. Make it playable locally (X)
 2. Make it playable online
 3. Make sure clients can register with a Username 
 4. Every client should be able to ask the server for a client list
