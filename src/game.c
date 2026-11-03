@@ -12,6 +12,7 @@ void init_game(Game *game) {
     game->captures[1] = 0;//Same here
     game->current_player = 0; // Player 1 starts
     game->finished = 0; // Game is not finished
+    game->move_count = 0; //No moves played yet
 }
 
 
@@ -121,6 +122,8 @@ if (opponent_seeds > captured_seeds) {//Knowing it's legal, we proceed to captur
     }
 }
 
+
+    game->move_count++; //One more move played
 
     // Switch players
     game->current_player = 1 - game->current_player;
@@ -244,6 +247,11 @@ int check_game_over(Game *game){
 
     //Check victory by majority
     if (game->captures[0]>=25 || game->captures[1]>=25) {
+        finish_game(game);
+        return 1; // Game is over
+    }
+
+    if (game->move_count >= MAX_MOVES) { //Stop endless games: each player keeps the seeds on their side
         finish_game(game);
         return 1; // Game is over
     }
