@@ -1,138 +1,145 @@
 
-#include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <winsock2.h>
-#include <stdint.h>
-#include "protocol.h"
+#include <string.h>
+#include <limits.h>
+#include <errno.h>
 
-#define MAX_PAYLOAD 212
+#include "network.h"
 
-static int send_all(SOCKET socket, const char *data, int length) { // Send all bytes of a message
+//Sending  full message
+static int send_all(SOCKET socket, const char *buffer, int length)
+{
     int sent = 0;
 
     while (sent < length) {
-        int result = send(socket, data + sent, length - sent, 0); //While it's not done, send the rest of the message
+        int n = send(socket, buffer + sent, length - sent, 0);
 
-        if (result <= 0) return -1; //If the send fails, return -1
+        if (n <= 0) {
+            return -1;
+        }
 
-        sent += result;
+        sent += n;
     }
 
     return 0;
 }
 
-static int recv_all(SOCKET socket, char *data, int length) { // Receive all bytes of a message
-    int received = 0; //Counter for the number of bytes received
+int send_message(SOCKET socket, const Message *message) //Action of sending a message
+{//Takes a socket and a message
+    char buffer[MAX_LINE + 1]; //Max mesage length
+    int length;//Length of the message
 
-    while (received < length) { //While we haven't received the entire message, keep receiving
-        int result = recv(socket, data + received, //recieve from socket, store in data
-                          length - received, 0);
-
-        if (result <= 0) return -1; //In failure return -1
-
-        received += result;
+    if (message == NULL) { //If it's null return nothing
+        return -1;
     }
 
-    return 0;
+    size_t type_len = strlen(message->type);
+    size_t content_len = strlen(message->content);
+
+    if (type_len < 1 || type_len > MAX_TYPE) return -1;
+    if (content_len > MAX_CONTENT) return -1;
+
+    //Check f there's invalid characters in the message type or content
+    if (strchr(message->type, MSG_END) != NULL ||
+        strchr(message->type, MSG_SEP) != NULL ||
+        strchr(message->content, MSG_END) != NULL)
+    {
+        return -1;
+    }
+
+    //Format the message and store it in a buffer which will be called length
+
+    length = snprintf(buffer,
+                      sizeof(buffer),
+                      "%s%c%c%c%c%c%d%c%s%c",
+                      message->type,
+                      MSG_SEP,
+                      message->response,
+                      MSG_SEP,
+                      message->mode,
+                      MSG_SEP,
+                      message->receiver,
+                      MSG_SEP,
+                      message->content,
+                      MSG_END);
+
+    if (length < 0 || (size_t)length >= sizeof(buffer)) {
+        return -1;
+    }
+
+    return send_all(socket, buffer, length); //Send the message making sure it sends all of it
 }
 
-int send_message(SOCKET socket, const Message *message) { // Send a message over the socket
-    if (message == NULL) return -1; // If the message is null return -1
+int receive_message(SOCKET socket, Message *message) { //Recieving a message
+    if (message == NULL) return -1; //If there's nothing to receive return -1
 
-    size_t type_len = strlen(message->type); //Get the byte length of the message type
-    size_t content_len = strlen(message->content); //Get the byte length of the message content
+    char buffer[MAX_LINE + 1];//Buffer to store the message, +1 for '\0'
+    int length = 0;//For now the length is 0
 
-    if (type_len < 1 || type_len > 2) return -1; //If the type is less than 1 or greater than 2 push error
-    if (content_len > MAX_MESSAGE) return -1; //If the content is too long push error
+    while (length < MAX_LINE) {//While length is smaller than the max line length
+        char c; //Character to store the message
 
-    char payload[MAX_PAYLOAD]; // Create a payload buffer to hold the serialized message
-    int pos = 0; //Start position counter
+        int result = recv(socket, &c, 1, 0);//Recieve the message from the socket, store it in c and take it one byte at a time
 
-    payload[pos++] = (char)type_len; // Store the length of the type in the first byte of the payload
+        if (result <= 0) return -1; //if the result is smaller than or equal to 0 return -1
 
-    memcpy(payload + pos, message->type, type_len); //
-    pos += (int)type_len;
+        if (c == MSG_END) break; //If the character is the end of the message break
 
-    uint16_t net_content_len = htons((uint16_t)content_len);
-    memcpy(payload + pos, &net_content_len, 2);
-    pos += 2;
+        buffer[length++] = c;//buffer in length ++ position is equal to c
+    }
 
-    memcpy(payload + pos, message->content, content_len);
-    pos += (int)content_len;
+    if (length == MAX_LINE) return -1; //If we reach the max message size we return -1
 
-    uint32_t net_receiver = htonl((uint32_t)message->receiver);
-    memcpy(payload + pos, &net_receiver, 4);
-    pos += 4;
+    buffer[length] = '\0'; //Null terminate the buffer
 
-    payload[pos++] = message->response;
-    payload[pos++] = message->mode;
+    char *fields[5]; //Pointer array to store our message
+    fields[0] = buffer;//First field is the buffer
 
-    uint32_t net_length = htonl((uint32_t)pos);
+    int field_count = 1;//Current field is 1
 
-    if (send_all(socket, (char *)&net_length, 4) != 0)
+    for (int i = 0; i < length; i++) {//For every character in the buffer
+        if (buffer[i] == MSG_SEP && field_count < 5) { //If the character is a separator and we've got less than 5 fields
+            buffer[i] = '\0'; //Replace the separator with a kill character
+            fields[field_count++] = &buffer[i + 1];//Increase the field and set the next field to the next character in the buffer
+        }
+    }
+
+    if (field_count != 5) return -1; //If we don't have 5 fields return -1
+
+    size_t type_len = strlen(fields[0]); //Length of the message type
+    size_t content_len = strlen(fields[4]); //Length of the content
+
+    if (type_len < 1 || type_len > MAX_TYPE) return -1; //If the type length is less than 1 or greater than the max type length return -1
+    if (strlen(fields[1]) != 1) return -1;//if the length of the response isn't 1 kill
+    if (strlen(fields[2]) != 1) return -1;//if the length of the mode isn't 1 kill
+    if (content_len > MAX_CONTENT) return -1; //If we exceed the max content length return -1
+
+    char *end; //Pointer to the end of the string
+    errno = 0;
+    long receiver = strtol(fields[3], &end, 10); //Convert the receiver field to a long integer
+
+    if (errno == ERANGE) return -1;
+    if (fields[3][0] == '\0' || *end != '\0') return -1; //If the receiver field is empty or if there are any non-numeric characters return -1
+    if (receiver < INT_MIN || receiver > INT_MAX) return -1;
+
+    if (fields[1][0] != RESP_SUCCESS && //If the response field isn't success, failure or none return -1
+        fields[1][0] != RESP_FAILURE &&
+        fields[1][0] != RESP_NONE) {
         return -1;
+    }
 
-    if (send_all(socket, payload, pos) != 0)
+    if (fields[2][0] != MODE_OBSERVER && //If the mode isn't observer, player or none return -1
+        fields[2][0] != MODE_PLAYER &&
+        fields[2][0] != MODE_NONE) {
         return -1;
+    }
 
-    return 0;
-}
-
-int receive_message(SOCKET socket, Message *message) {
-    if (message == NULL) return -1;
-
-    uint32_t net_length;
-
-    if (recv_all(socket, (char *)&net_length, 4) != 0)
-        return -1;
-
-    uint32_t length = ntohl(net_length);
-
-    if (length < 9 || length > MAX_PAYLOAD)
-        return -1;
-
-    char payload[MAX_PAYLOAD];
-
-    if (recv_all(socket, payload, (int)length) != 0)
-        return -1;
-
-    int pos = 0;
-
-    uint8_t type_len = (uint8_t)payload[pos++];
-
-    if (type_len < 1 || type_len > 2)
-        return -1;
-
-    if (pos + type_len + 2 > length)
-        return -1;
-
-    memcpy(message->type, payload + pos, type_len);
-    message->type[type_len] = '\0';
-    pos += type_len;
-
-    uint16_t net_content_len;
-    memcpy(&net_content_len, payload + pos, 2);
-    pos += 2;
-
-    uint16_t content_len = ntohs(net_content_len);
-
-    if (content_len > MAX_MESSAGE)
-        return -1;
-
-    if ((uint32_t)pos + content_len + 6 != length)
-        return -1;
-
-    memcpy(message->content, payload + pos, content_len);
-    message->content[content_len] = '\0';
-    pos += content_len;
-
-    uint32_t net_receiver;
-    memcpy(&net_receiver, payload + pos, 4);
-    message->receiver = (int32_t)ntohl(net_receiver);
-    pos += 4;
-
-    message->response = payload[pos++];
-    message->mode = payload[pos++];
+    memcpy(message->type, fields[0], type_len + 1); //Copy the message type to the message struct, account for the null terminator
+    message->response = fields[1][0]; //Set the response field in the message struct
+    message->mode = fields[2][0]; //Set the mode in the message struct
+    message->receiver = (int)receiver; //Set the receiver in its correct place in the struct
+    memcpy(message->content, fields[4], content_len + 1); //Copy the content to the message struct, account for the null terminator
 
     return 0;
 }

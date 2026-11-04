@@ -40,7 +40,7 @@ Every field travels as text, never as a raw struct or a pointer.
 #define MAX_FRIENDS 20 //Per player
 #define MAX_LIST 50 //Max entries sent in one LO or LG reply
 
-#define MAX_LINE (MAX_TYPE + 1 + 1 + 1 + 1 + 1 + 10 + 1 + MAX_CONTENT + 1) //Longest possible message, separators and '\n' included
+#define MAX_LINE (MAX_TYPE + 1 + 1 + 1 + 1 + 1 + 1 + 11 + 1 + MAX_CONTENT + 1) //Longest possible message, separators and '\n' included
 
 //Response values
 

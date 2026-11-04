@@ -1,16 +1,13 @@
-//Sending and receiving messages over a socket. Declarations
-
-
 #ifndef NETWORK_H
 #define NETWORK_H
 
 #include "protocol.h"
 
-#ifdef _WIN32 //Windows
+#ifdef _WIN32
 
 #include <winsock2.h>
 
-#else //Linux
+#else
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -18,7 +15,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-typedef int SOCKET; //Windows calls a socket SOCKET, Linux uses an int
+typedef int SOCKET;
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket(s) close(s)
