@@ -52,10 +52,53 @@ int send_message(SOCKET socket, const Message *message) //Action of sending a me
                       message->receiver, //The player id of the receiver
                       message->content); //The message itself
 
-    if (length < 0 || length >= sizeof(buffer)) { //If the length is negative or greater than the buffer size return nothing
+    if (length < 0 || (size_t)length >= sizeof(buffer)) { //If the length is negative or greater than the buffer size return nothing
         return 0;
     }
 
     return send_all(socket, buffer, length); //Send the message making sure it sends all of it
 }
+
+
+
+int receive_message(SOCKET socket, Message *message)
+{
+    char buffer[MAX_LINE];
+    int received = 0;
+
+    if (message == NULL) {
+        return -1;
+    }
+
+    // Receive one byte at a time until newline
+    while (received < MAX_LINE - 1) {
+        char c;
+        int n = recv(socket, &c, 1, 0);
+
+        if (n <= 0) {
+            return -1;
+        }
+
+        if (c == '\n') {
+            break;
+        }
+
+        buffer[received++] = c;
+    }
+
+    buffer[received] = '\0';
+
+    // Parse the received message
+    if (sscanf(buffer, "%[^|]|%c|%c|%d|%[^\n]",
+               message->type,
+               &message->response,
+               &message->mode,
+               &message->receiver,
+               message->content) != 5) {
+        return -1;
+    }
+
+    return 0;
+}
+
 
