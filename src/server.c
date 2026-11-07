@@ -1,134 +1,356 @@
-
 #include <stdio.h>
-#include <winsock2.h>
-#include <windows.h>
-#include <string.h>
 #include <stdlib.h>
 
+#include <winsock2.h>
+#include <windows.h>
+
 #include "network.h"
+#include "server_logic.h"
 
-DWORD WINAPI client_thread(LPVOID arg) //This function will be the one that will be executed by the thread for each client connection. It will receive messages from the client and print them to the console.
+/*
+ * Socket table.
+ *
+ * server_logic owns session indices and generations.
+ * server.c only stores the socket associated with each session
+ * and a cached copy of that session's generation.
+ */
+static SOCKET session_sockets[MAX_CLIENTS];
+static unsigned int socket_generations[MAX_CLIENTS];
+
+static CRITICAL_SECTION socket_lock;
+
+
+/*
+ * Information passed to each client thread.
+ */
+typedef struct {
+    SOCKET socket;
+    int session_index;
+    unsigned int generation;
+} ClientThreadArgs;
+
+
+/*
+ * Send all messages in an outbox.
+ *
+ * Each entry identifies the intended recipient by:
+ *   - session_index
+ *   - generation
+ *
+ * The generation check prevents a message intended for an old
+ * session from being sent to a new client that reused its slot.
+ *
+ * The lock is held for the entire loop so that another thread
+ * cannot clear or replace a socket while it is being used here.
+ */
+static void send_outbox(const Outbox *outbox)
 {
-    SOCKET client_socket = *(SOCKET *)arg; //Creating a socket for client connection
-    free(arg); //Freeing the memory allocated for the socket
+    if (outbox == NULL) {
+        return;
+    }
 
-    Message message; //Creating a new message struct
+    EnterCriticalSection(&socket_lock);
 
-    while (1) { //Eternal loop to keep our ears perched
-        int result = receive_message(client_socket, &message);//Result being the message recieved from the client socket, pre stored in a message struct
+    for (int i = 0; i < outbox->count; i++) {
+        const OutboxEntry *entry = &outbox->entries[i];
 
-        if (result != 0) { //If it's not 0it means we have a dictonection and thus the operation has failed
+        int index = entry->session_index;
+
+        if (index < 0 || index >= MAX_CLIENTS) {
+            continue;
+        }
+
+        if (session_sockets[index] == INVALID_SOCKET) {
+            continue;
+        }
+
+        if (socket_generations[index] != entry->generation) {
+            continue;
+        }
+
+        /*
+         * A failed send is ignored here.
+         * The recipient's own client thread will detect its
+         * disconnection or communication failure.
+         */
+        send_message(session_sockets[index], &entry->message);
+    }
+
+    LeaveCriticalSection(&socket_lock);
+}
+
+
+/*
+ * Remove a client session and close its socket.
+ *
+ * logic_disconnect performs the game/session cleanup and fills
+ * an outbox with any notifications that need to be sent.
+ *
+ * The socket table entry is cleared only if it still belongs
+ * to this exact session generation and socket.
+ */
+static void disconnect_client(
+    SOCKET client_socket,
+    int session_index,
+    unsigned int generation)
+{
+    Outbox outbox = {0};
+
+    /* Update server logic and collect notifications. */
+    logic_disconnect(session_index, &outbox);
+
+    /* Send notifications to the remaining clients. */
+    send_outbox(&outbox);
+
+    /*
+     * Clear the socket slot only if it still belongs to this
+     * client. A newer client may already have reused the slot.
+     */
+    EnterCriticalSection(&socket_lock);
+
+    if (socket_generations[session_index] == generation &&
+        session_sockets[session_index] == client_socket) {
+
+        session_sockets[session_index] = INVALID_SOCKET;
+    }
+
+    LeaveCriticalSection(&socket_lock);
+
+    closesocket(client_socket);
+}
+
+
+/*
+ * Thread function: handles one connected client.
+ */
+static DWORD WINAPI client_thread(LPVOID arg)
+{
+    ClientThreadArgs *args = (ClientThreadArgs *)arg;
+
+    SOCKET client_socket = args->socket;
+    int session_index = args->session_index;
+    unsigned int generation = args->generation;
+
+    free(args);
+
+    printf("Client connected. Session: %d\n", session_index);
+
+    while (1) {
+        Message message;
+
+        if (receive_message(client_socket, &message) != 0) {
             printf("Client disconnected or communication failed.\n");
             break;
         }
 
-        printf("Message received: %s | %c | %c | %d | %s\n", //Print our message
-               message.type,
-               message.response,
-               message.mode,
-               message.receiver,
-               message.content);
+        /*
+         * Each request gets its own outbox.
+         * server_logic fills it with the reply and any notifications.
+         */
+        Outbox outbox = {0};
 
-        message.response = RESP_SUCCESS;
-        if (send_message(client_socket, &message) != 0) {
-            printf("Failed to send response.\n");
-            break;
-        }
+        logic_handle_message(session_index, &message, &outbox);
+
+        /* Send every message generated by server_logic. */
+        send_outbox(&outbox);
     }
 
-    closesocket(client_socket);//We close the socket
+    disconnect_client(client_socket, session_index, generation);
 
-    return 0;//We return 0 to indicate that the thread has finished executing
+    printf("Client session %d disconnected.\n", session_index);
+
+    return 0;
 }
 
-int main(void) //Main
+
+/*
+ * Main server entry point.
+ */
+int main(void)
 {
-    WSADATA wsa; //A struct that contains information about the Windows Sockets implementation
-    SOCKET server_socket; //Our server socket
-    SOCKET client_socket; //Our client socket
-    struct sockaddr_in server_addr; //Server adress
-    struct sockaddr_in client_addr; //Client adress
-    int addr_len = sizeof(client_addr); //Size of the client adress
+    WSADATA wsa_data;
 
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {//If the WSAStartup function fails, it returns a non-zero value. In that case, we print an error message and return 1 to indicate failure.
-        printf("Winsock initialization failed.\n");
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        printf("WSAStartup failed.\n");
         return 1;
     }
 
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);//Create the server socket using the socket function. Address, type and protocol.
-
-    if (server_socket == INVALID_SOCKET) { //If it's invalid
-        printf("Socket creation failed.\n");//We die
-        WSACleanup();//We clean up the Winsock library
-        return 1; //And show failure
+    /*
+     * Initialize the socket table.
+     */
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        session_sockets[i] = INVALID_SOCKET;
+        socket_generations[i] = 0;
     }
 
-    memset(&server_addr, 0, sizeof(server_addr)); //Use server address to 0 to avoid garbage values
-    server_addr.sin_family = AF_INET; //Set the address family to AF_INET for IPv4
-    server_addr.sin_port = htons(SERVER_PORT); //Set the port number to SERVER_PORT, converting it to network byte order using htons
-    server_addr.sin_addr.s_addr = INADDR_ANY; //Set the IP address to INADDR_ANY, which allows the server to accept connections on any available network interface
+    InitializeCriticalSection(&socket_lock);
 
-    if (bind(server_socket, (struct sockaddr *)&server_addr, // we asociate the server socket with the adress and given port. If this fails we die.
-             sizeof(server_addr)) == SOCKET_ERROR) {
-        printf("Bind failed: %d\n", WSAGetLastError());
-        closesocket(server_socket);
+    /*
+     * Initialize server logic before accepting clients.
+     */
+    if (logic_init() != 0) {
+        printf("Server logic initialization failed.\n");
+
+        DeleteCriticalSection(&socket_lock);
         WSACleanup();
+
         return 1;
     }
 
-    if (listen(server_socket, MAX_CLIENTS) == SOCKET_ERROR) { //We listen with the server socket and the max clients. If this fails we die.
+    /*
+     * Create the listening socket.
+     */
+    SOCKET server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    if (server_socket == INVALID_SOCKET) {
+        printf("Could not create server socket.\n");
+
+        DeleteCriticalSection(&socket_lock);
+        WSACleanup();
+
+        return 1;
+    }
+
+    /*
+     * Configure the server address.
+     */
+    struct sockaddr_in server_address = {0};
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(SERVER_PORT);
+
+    /*
+     * Bind the socket.
+     */
+    if (bind(
+            server_socket,
+            (struct sockaddr *)&server_address,
+            sizeof(server_address)) == SOCKET_ERROR) {
+
+        printf("Bind failed.\n");
+
+        closesocket(server_socket);
+        DeleteCriticalSection(&socket_lock);
+        WSACleanup();
+
+        return 1;
+    }
+
+    /*
+     * Start listening.
+     */
+    if (listen(server_socket, SOMAXCONN) == SOCKET_ERROR) {
         printf("Listen failed.\n");
+
         closesocket(server_socket);
+        DeleteCriticalSection(&socket_lock);
         WSACleanup();
+
         return 1;
     }
 
-    printf("Server listening on port %d.\n", SERVER_PORT); //Announce we're open to recieve connections
+    printf("Server listening on port %d...\n", SERVER_PORT);
 
-    while (1) { //Eternal loop to keep our ears perched
-        addr_len = sizeof(client_addr);//Reset the address length for each new connection
+    /*
+     * Accept clients.
+     */
+    while (1) {
+        SOCKET client_socket = accept(server_socket, NULL, NULL);
 
-        client_socket = accept(server_socket, //Accept clients with socke, client and adress
-                               (struct sockaddr *)&client_addr,
-                               &addr_len);
-
-        if (client_socket == INVALID_SOCKET) { //If the socket is invalid we print error and keep going
-            printf("Accept failed: %d\n", WSAGetLastError());
+        if (client_socket == INVALID_SOCKET) {
+            printf("Accept failed.\n");
             continue;
         }
 
-        printf("Client connected!\n"); //If not, it's succesful and we print it
+        unsigned int generation = 0;
+        int session_index;
 
-        SOCKET *client_arg = malloc(sizeof(SOCKET)); //Allocate memory for the client socket argument to be passed to the thread
+        /*
+         * Allocate a session and register its socket.
+         *
+         * Holding socket_lock across both operations ensures
+         * send_outbox cannot observe a newly allocated session
+         * before its socket and generation have been registered.
+         *
+         * logic_connect internally acquires and releases its own
+         * server-logic lock.
+         */
+        EnterCriticalSection(&socket_lock);
 
-        if (client_arg == NULL) {//If the client's null we fail memory allocation
-            printf("Memory allocation failed.\n");
+        session_index = logic_connect(&generation);
+
+        if (session_index >= 0) {
+            session_sockets[session_index] = client_socket;
+            socket_generations[session_index] = generation;
+        }
+
+        LeaveCriticalSection(&socket_lock);
+
+        if (session_index < 0) {
+            printf("No free session slots. Rejecting client.\n");
+
             closesocket(client_socket);
             continue;
         }
 
-        *client_arg = client_socket; //client_arg points to the client socket
+        /*
+         * Prepare the thread arguments.
+         */
+        ClientThreadArgs *args =
+            (ClientThreadArgs *)malloc(sizeof(ClientThreadArgs));
 
-        HANDLE thread = CreateThread( //We create a new thread to handle the client connection
+        if (args == NULL) {
+            printf("Could not allocate client thread arguments.\n");
+
+            disconnect_client(
+                client_socket,
+                session_index,
+                generation);
+
+            continue;
+        }
+
+        args->socket = client_socket;
+        args->session_index = session_index;
+        args->generation = generation;
+
+        /*
+         * Start the client thread.
+         */
+        HANDLE thread = CreateThread(
             NULL,
             0,
             client_thread,
-            client_arg,
+            args,
             0,
-            NULL
-        );
+            NULL);
 
-        if (thread == NULL) { //If the thread is null we failed and print, we continue as not to break the server for other clients
-            printf("Thread creation failed.\n");
-            free(client_arg);
-            closesocket(client_socket);
+        if (thread == NULL) {
+            printf("Could not create client thread.\n");
+
+            free(args);
+
+            disconnect_client(
+                client_socket,
+                session_index,
+                generation);
+
             continue;
         }
 
+        /*
+         * The thread runs independently, so we do not need
+         * to keep its handle.
+         */
         CloseHandle(thread);
     }
 
+    /*
+     * The accept loop normally runs indefinitely.
+     */
     closesocket(server_socket);
+    DeleteCriticalSection(&socket_lock);
     WSACleanup();
 
     return 0;

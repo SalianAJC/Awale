@@ -98,7 +98,5 @@ typedef struct {
     char content[MAX_CONTENT + 1]; //Type-specific text, +1 for '\0'
 } Message;
 
-typedef Message messageClient; //Client -> Server. Same fields as the server message
-typedef Message messageServer; //Server -> Client
 
 #endif
