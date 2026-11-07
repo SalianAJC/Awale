@@ -7,6 +7,10 @@
 #include "network.h"
 #include "server_logic.h"
 
+
+
+
+
 /*
  * Socket table.
  *
@@ -14,10 +18,10 @@
  * server.c only stores the socket associated with each session
  * and a cached copy of that session's generation.
  */
-static SOCKET session_sockets[MAX_CLIENTS];
-static unsigned int socket_generations[MAX_CLIENTS];
+SOCKET session_sockets[MAX_CLIENTS];
+unsigned int socket_generations[MAX_CLIENTS];
 
-static CRITICAL_SECTION socket_lock;
+CRITICAL_SECTION socket_lock;
 
 
 /*
@@ -43,7 +47,7 @@ typedef struct {
  * The lock is held for the entire loop so that another thread
  * cannot clear or replace a socket while it is being used here.
  */
-static void send_outbox(const Outbox *outbox)
+ void send_outbox(const Outbox *outbox)
 {
     if (outbox == NULL) {
         return;
@@ -89,7 +93,7 @@ static void send_outbox(const Outbox *outbox)
  * The socket table entry is cleared only if it still belongs
  * to this exact session generation and socket.
  */
-static void disconnect_client(
+ void disconnect_client(
     SOCKET client_socket,
     int session_index,
     unsigned int generation)
@@ -123,7 +127,7 @@ static void disconnect_client(
 /*
  * Thread function: handles one connected client.
  */
-static DWORD WINAPI client_thread(LPVOID arg)
+DWORD WINAPI client_thread(LPVOID arg)
 {
     ClientThreadArgs *args = (ClientThreadArgs *)arg;
 
@@ -355,3 +359,4 @@ int main(void)
 
     return 0;
 }
+

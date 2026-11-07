@@ -59,6 +59,7 @@ Every field travels as text, never as a raw struct or a pointer.
 //Account
 #define MSG_REGISTER "R" //C->S : username, password
 #define MSG_LOGIN "L" //C->S : username, password
+#define MSG_ERROR "E"
 
 //Lobby
 #define MSG_LIST_ONLINE "LO" //C->S request, S->C reply : list of online players

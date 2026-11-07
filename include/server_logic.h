@@ -9,11 +9,20 @@
 #define MAX_OUTBOX_ENTRIES (MAX_CLIENTS + 5)
 
 typedef enum {
+    STATE_OFFLINE,
     STATE_CONNECTED,
-    STATE_LOBBY,
     STATE_IN_GAME,
     STATE_OBSERVING
 } SessionState;
+
+typedef struct {
+    int player_id;
+    char username[MAX_NAME + 1];
+    char bio[BIO_SIZE + 1];
+    int friends_ids[MAX_FRIENDS];
+    int session_index;
+    char Flag; // P for private, ... for Public ? 
+} Account;
 
 typedef struct {
     int in_use;
@@ -35,7 +44,7 @@ typedef struct {
     int count;
 } Outbox;
 
-int logic_init(void);
+
 
 // Public functions
 Message registerUser(const Message *request);
@@ -46,6 +55,8 @@ Message registerUser(const Message *request);
  * Writes the generation only on success.
  * The generation pointer must not be NULL.
  */
+int logic_init();
+
 int logic_connect(unsigned int *generation);
 
 void logic_handle_message(
