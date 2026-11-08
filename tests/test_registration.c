@@ -88,6 +88,141 @@ static void check_reply(int from, unsigned int from_generation,
     }
 }
 
+//Sends a login and checks the reply. After a successful login the server may also
+//push the online list (S), so one or two outbox entries are accepted
+static void check_login(int from, unsigned int from_generation, const char *name,
+                        char expected, const char *expected_content, const char *label)
+{
+    Message request = {0};
+    strcpy(request.type, MSG_LOGIN);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    strcpy(request.content, name);
+
+    Outbox outbox = {0};
+    logic_handle_message(from, &request, &outbox);
+
+    char details[MAX_CONTENT + 200];
+    int max_entries = (expected == RESP_SUCCESS) ? 2 : 1;
+
+    if (outbox.count < 1 || outbox.count > max_entries) {
+        snprintf(details, sizeof(details), "expected 1 to %d outbox entries, got %d",
+                 max_entries, outbox.count);
+        report(0, label, details);
+        return;
+    }
+
+    const OutboxEntry *entry = &outbox.entries[0];
+    const Message *reply = &entry->message;
+
+    int ok = 1;
+
+    if (entry->session_index != from) ok = 0;
+    if (entry->generation != from_generation) ok = 0;
+    if (strcmp(reply->type, MSG_LOGIN) != 0) ok = 0;
+    if (reply->response != expected) ok = 0;
+    if (reply->mode != MODE_NONE) ok = 0;
+    if (expected_content != NULL && strcmp(reply->content, expected_content) != 0) ok = 0;
+
+    //Optional second entry: the S push, to the same session
+    if (outbox.count == 2) {
+        const OutboxEntry *push = &outbox.entries[1];
+
+        if (push->session_index != from) ok = 0;
+        if (strcmp(push->message.type, MSG_PLAYERS_ONLINE) != 0) ok = 0;
+        if (push->message.response != RESP_NONE) ok = 0;
+    }
+
+    snprintf(details, sizeof(details),
+             "expected %c, got %c | type \"%s\" | \"%s\" | %d entr%s",
+             expected,
+             reply->response ? reply->response : '?',
+             reply->type,
+             reply->content,
+             outbox.count,
+             outbox.count == 1 ? "y" : "ies");
+
+    report(ok, label, details);
+}
+
+//Sends LO and checks the reply: exactly one entry, LO|S, with this exact list
+static void check_list(int from, unsigned int from_generation,
+                       const char *expected_list, const char *label)
+{
+    Message request = {0};
+    strcpy(request.type, MSG_LIST_ONLINE);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+
+    Outbox outbox = {0};
+    logic_handle_message(from, &request, &outbox);
+
+    char details[MAX_CONTENT + 200];
+
+    if (outbox.count != 1) {
+        snprintf(details, sizeof(details), "expected exactly 1 outbox entry, got %d", outbox.count);
+        report(0, label, details);
+        return;
+    }
+
+    const OutboxEntry *entry = &outbox.entries[0];
+    const Message *reply = &entry->message;
+
+    int ok = entry->session_index == from &&
+             entry->generation == from_generation &&
+             strcmp(reply->type, MSG_LIST_ONLINE) == 0 &&
+             reply->response == RESP_SUCCESS &&
+             reply->mode == MODE_NONE &&
+             strcmp(reply->content, expected_list) == 0;
+
+    snprintf(details, sizeof(details), "expected \"%s\", got %c \"%s\"",
+             expected_list, reply->response ? reply->response : '?', reply->content);
+
+    report(ok, label, details);
+}
+
+//Logs in and checks that the S push is present and carries this exact list
+static void check_login_push(int from, unsigned int from_generation, const char *name,
+                             const char *expected_list, const char *label)
+{
+    Message request = {0};
+    strcpy(request.type, MSG_LOGIN);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    strcpy(request.content, name);
+
+    Outbox outbox = {0};
+    logic_handle_message(from, &request, &outbox);
+
+    char details[MAX_CONTENT + 200];
+
+    if (outbox.count != 2) {
+        snprintf(details, sizeof(details),
+                 "expected 2 outbox entries (reply + S push), got %d", outbox.count);
+        report(0, label, details);
+        return;
+    }
+
+    const OutboxEntry *first = &outbox.entries[0];
+    const OutboxEntry *push = &outbox.entries[1];
+
+    int ok = strcmp(first->message.type, MSG_LOGIN) == 0 &&
+             first->message.response == RESP_SUCCESS &&
+             push->session_index == from &&
+             push->generation == from_generation &&
+             strcmp(push->message.type, MSG_PLAYERS_ONLINE) == 0 &&
+             push->message.response == RESP_NONE &&
+             push->message.mode == MODE_NONE &&
+             strcmp(push->message.content, expected_list) == 0;
+
+    snprintf(details, sizeof(details), "push expected \"%s\", got %s|%c \"%s\"",
+             expected_list, push->message.type,
+             push->message.response ? push->message.response : '?',
+             push->message.content);
+
+    report(ok, label, details);
+}
+
 //Shortcut for a registration request from the main test session
 static void check_register(const char *name, char expected, const char *label)
 {
@@ -155,6 +290,66 @@ int main(void)
     //Lobby messages are refused before login
     check_reply(session, generation, MSG_LIST_ONLINE, "", MSG_LIST_ONLINE, RESP_FAILURE,
                 "LO before login");
+
+    //------------------------------------------------------------
+    printf("\n-- Login\n");
+
+    //Uses its own sessions, so the main session stays "not logged in"
+    unsigned int gen_a = 0, gen_b = 0;
+    int sa = logic_connect(&gen_a);
+    int sb = logic_connect(&gen_b);
+    Outbox discard = {0};
+
+    check_login(sa, gen_a, "nobody", RESP_FAILURE, "unknown user", "unknown user");
+    check_login(sa, gen_a, "Alice", RESP_SUCCESS, "Alice", "login OK");
+
+    //Once logged in, R and L are refused by the dispatcher
+    check_reply(sa, gen_a, MSG_REGISTER, "Dave", MSG_REGISTER, RESP_FAILURE,
+                "register after login");
+    check_login(sa, gen_a, "Bob", RESP_FAILURE, "not allowed now", "login twice, same session");
+
+    //Same account from another client
+    check_login(sb, gen_b, "Alice", RESP_FAILURE, "already connected", "already connected");
+
+    //Another account from the second client works
+    check_login(sb, gen_b, "Bob", RESP_SUCCESS, "Bob", "second player logs in");
+
+    //After Alice disconnects, her account is free again
+    logic_disconnect(sa, &discard);
+
+    unsigned int gen_c = 0;
+    int sc = logic_connect(&gen_c);
+    check_login(sc, gen_c, "Alice", RESP_SUCCESS, "Alice", "login again after leaving");
+
+    logic_disconnect(sb, &discard);
+    logic_disconnect(sc, &discard);
+
+    //------------------------------------------------------------
+    printf("\n-- List online (LO and the S push)\n");
+
+    //Own sessions again. Players appear in session order, so connect in a known order.
+    //The main session is connected but not logged in: it must never be listed
+    unsigned int gen_d = 0, gen_e = 0, gen_f = 0;
+    int sd = logic_connect(&gen_d);
+    int se = logic_connect(&gen_e);
+
+    check_login_push(sd, gen_d, "Alice", "Alice:L", "S push, alone");
+    check_list(sd, gen_d, "Alice:L", "one player");
+
+    check_login_push(se, gen_e, "Bob", "Alice:L,Bob:L", "S push includes others");
+    check_list(sd, gen_d, "Alice:L,Bob:L", "two players, no trailing ,");
+    check_list(se, gen_e, "Alice:L,Bob:L", "same list for everyone");
+
+    //A connected client that is not logged in is not listed
+    int sf = logic_connect(&gen_f);
+    check_list(se, gen_e, "Alice:L,Bob:L", "not logged in: not listed");
+
+    //After a disconnect the player disappears
+    logic_disconnect(sd, &discard);
+    check_list(se, gen_e, "Bob:L", "after a disconnect");
+
+    logic_disconnect(se, &discard);
+    logic_disconnect(sf, &discard);
 
     //------------------------------------------------------------
     printf("\n-- Sessions\n");
