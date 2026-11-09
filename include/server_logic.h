@@ -22,10 +22,14 @@ typedef enum {
 typedef struct {
     int player_id;
     char username[MAX_NAME + 1];
-    char bio[BIO_SIZE + 1];
     int friends_ids[MAX_FRIENDS];
     int session_index; //Session the player is connected on, -1 = offline
     char Flag; //P for private, ... for Public ?
+
+    char bio[MAX_BIO_LINES * (MAX_BIO_LINE + 1)];
+    int private_mode; //1 = only friends can watch
+    int rating;  //ELO, START_RATING at register
+
 } Account;
 
 //One connection. One slot per connected client, the slot number is the session index

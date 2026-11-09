@@ -387,7 +387,10 @@ int main(void)
                 MSG_REGISTER, RESP_FAILURE, "account kept after leaving");
 
     logic_disconnect(session3, &outbox);
+    
 
+
+    
     //Fill every session slot, then one more must be refused
     int connected = 1; //The main test session is still connected
     int connect_failed = 0;

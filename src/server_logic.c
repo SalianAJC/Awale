@@ -13,6 +13,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <limits.h>
 #include <windows.h>
 
 #include "match.h"
@@ -70,7 +73,50 @@ static Message make_message(
 }
 
 
+// Main Game
+static int parse_int(const char *text, int min, int max, int *out)
+{
+    char *end;
+    long value;
 
+    if (text == NULL || text[0] == '\0' || out == NULL)
+        return -1;
+
+    errno = 0;
+    value = strtol(text, &end, 10);
+
+    if (*end != '\0' || errno == ERANGE || value < min || value > max)
+        return -1;
+
+    *out = (int)value;
+    return 0;
+}
+
+static int side_of(int m, int account)
+{
+    if (matches[m].side_account[0] == account)
+        return 0;
+
+    return 1;
+}
+
+static int opponent_of(int m, int account)
+{
+    int side = side_of(m, account);
+
+    return matches[m].side_account[1 - side];
+}
+
+static int find_match_by_game_id(int id)
+{
+    for (int i = 0; i < MAX_GAMES; i++)
+    {
+        if (matches[i].in_use && matches[i].game_id == id)
+            return i;
+    }
+
+    return -1;
+}
 
 // ---------- Outbox ----------
 
@@ -231,7 +277,76 @@ static int has_only_legal_characters(const char *username)
 // Defined with the online-list handler, also used by login.
 static void build_online_list(char *buffer, size_t size);
 
+static void notify_match(Outbox *outbox, int m,
+                         const char *type, const char *content,
+                         int skip_session)
+{
+    for (int i = 0; i < 2; i++)
+    {
+        int account = matches[m].side_account[i];
+        int session = accounts[account].session_index;
 
+        if (session == -1 || session == skip_session)
+            continue;
+
+        push(outbox, session, type, MODE_PLAYER, content);
+    }
+
+    for (int i = 0; i < matches[m].observer_count; i++)
+    {
+        int session = matches[m].observers[i];
+
+        if (session == skip_session)
+            continue;
+
+        push(outbox, session, type, MODE_OBSERVER, content);
+    }
+}
+static void end_match(Outbox *outbox, int m,
+                      int winner_account, const char *reason,
+                      int skip_session)
+{
+    char content[MAX_CONTENT];
+    const char *winner = "draw";
+
+    if (winner_account != -1)
+        winner = accounts[winner_account].username;
+
+    snprintf(content, sizeof(content), "%d %d %d %s %s",
+             matches[m].game_id,
+             matches[m].game.captures[0],
+             matches[m].game.captures[1],
+             winner,
+             reason);
+
+    notify_match(outbox, m, MSG_GAME_OVER, content, skip_session);
+
+    for (int i = 0; i < 2; i++)
+    {
+        int account = matches[m].side_account[i];
+        int session = accounts[account].session_index;
+
+        if (session != -1)
+        {
+            sessions[session].state = STATE_LOBBY;
+            sessions[session].match_index = -1;
+        }
+    }
+
+    for (int i = 0; i < matches[m].observer_count; i++)
+    {
+        int session = matches[m].observers[i];
+
+        if (session != skip_session)
+        {
+            sessions[session].state = STATE_LOBBY;
+            sessions[session].match_index = -1;
+        }
+    }
+
+    matches[m].in_use = 0;
+    matches[m].observer_count = 0;
+}
 // ================================================================
 // 3. HANDLERS
 // ================================================================
@@ -733,6 +848,103 @@ static void handle_accept(int session, const Message *request, Outbox *outbox){
     push(outbox, session, MSG_GAME_START, MODE_PLAYER, content_b);
 }
 
+static void handle_move(int session_index, const Message *message,
+                        Outbox *outbox)
+{
+    Session *session = &sessions[session_index];
+    int me = session->account_index;
+    int m = session->match_index;
+    int side;
+    int hole;
+    Game *g;
+    char content[MAX_CONTENT];
+
+    if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
+    {
+        send_to(outbox, session_index, MSG_MOVE,
+              MODE_PLAYER, RESP_FAILURE, "illegal move");
+        return;
+    }
+
+    g = &matches[m].game;
+    side = side_of(m, me);
+
+    // 1. Check the format
+    if (parse_int(message->content, 0, 11, &hole) != 0)
+    {
+        send_to(outbox, session_index, MSG_MOVE,
+              MODE_PLAYER, RESP_FAILURE, "bad format");
+        return;
+    }
+
+    // 2. Check whose turn it is
+    if (g->current_player != side)
+    {
+        send_to(outbox, session_index, MSG_MOVE,
+              MODE_PLAYER, RESP_FAILURE, "not your turn");
+        return;
+    }
+
+    // 3. Check whether the move is legal
+    if (matches[m].move_count >= MAX_MOVES || sow(g, hole) != 0)
+    {
+        send_to(outbox, session_index, MSG_MOVE,
+              MODE_PLAYER, RESP_FAILURE, "illegal move");
+        return;
+    }
+
+    // Record the move
+    matches[m].moves[matches[m].move_count++] = hole;
+
+    // Reply to the player who moved
+    snprintf(content, sizeof(content), "%d", hole);
+    send_to(outbox, session_index, MSG_MOVE,
+            MODE_PLAYER, RESP_SUCCESS, content);
+
+    // Notify both players and observers
+    snprintf(content, sizeof(content), "%d %d",
+             matches[m].game_id, hole);
+
+    notify_match(outbox, m, MSG_BOARD_UPDATE, content, -1);
+
+    // End the game if necessary
+    if (g->finished)
+    {
+        int winner = -1;
+
+        if (g->captures[0] > g->captures[1])
+            winner = matches[m].side_account[0];
+        else if (g->captures[1] > g->captures[0])
+            winner = matches[m].side_account[1];
+
+        end_match(outbox, m, winner, "end", -1);
+    }
+}
+
+static void handle_resign(int session_index, const Message *message,
+                          Outbox *outbox)
+{
+    Session *session = &sessions[session_index];
+    int me = session->account_index;
+    int m = session->match_index;
+    int winner;
+
+    (void)message;
+
+    if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
+    {
+        reply(outbox, session_index, MSG_RESIGN,
+              RESP_FAILURE, "not in a game");
+        return;
+    }
+
+    winner = opponent_of(m, me);
+
+    send_to(outbox, session_index, MSG_RESIGN,
+            MODE_PLAYER, RESP_SUCCESS, "");
+
+    end_match(outbox, m, winner, "resign", -1);
+}
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -776,7 +988,8 @@ static const MessageRule message_table[] = {
     { MSG_REFUSE,    ALLOW_LOBBY, handle_refuse },
 
     // Game
-    // { MSG_MOVE,      ALLOW_IN_GAME, handle_move },
+    { MSG_MOVE,      ALLOW_IN_GAME, handle_move },
+    { MSG_RESIGN, ALLOW_IN_GAME, handle_resign },
 
     // Chat
     // { MSG_CHAT,      ALLOW_LOGGED_IN, handle_chat },
@@ -933,10 +1146,9 @@ end:
 }
 
 
+
 void logic_disconnect(int session_index, Outbox *outbox)
 {
-    (void)outbox; // Used later for disconnect notifications.
-
     if (outbox == NULL) {
         return;
     }
@@ -953,25 +1165,62 @@ void logic_disconnect(int session_index, Outbox *outbox)
 
     Session *session = &sessions[session_index];
 
-    // Mark the account offline, but keep the account itself.
-    if (
-        session->account_index >= 0 &&
-        session->account_index < account_count
-    ) {
-        accounts[session->account_index].session_index = -1;
+    // If the player disconnects during a game,
+    // the opponent wins.
+    if (session->state == STATE_IN_GAME)
+    {
+        int m = session->match_index;
+        int me = session->account_index;
+
+        if (
+            m >= 0 &&
+            m < MAX_GAMES &&
+            matches[m].in_use &&
+            me >= 0 &&
+            me < account_count
+        ) {
+            int winner = opponent_of(m, me);
+
+            end_match(outbox, m, winner, "left", session_index);
+        }
+    }
+    // If the player is observing, remove them from the match.
+    else if (session->state == STATE_OBSERVING)
+    {
+        int m = session->match_index;
+
+        if (m >= 0 && m < MAX_GAMES && matches[m].in_use)
+        {
+            for (int i = 0; i < matches[m].observer_count; i++)
+            {
+                if (matches[m].observers[i] == session_index)
+                {
+                    matches[m].observers[i] =
+                        matches[m].observers[matches[m].observer_count - 1];
+
+                    matches[m].observer_count--;
+                    break;
+                }
+            }
+        }
     }
 
-    // TODO:
-    // End the game, remove observers and cancel challenges.
-    
-
-    // Cancel challenges targeting this player
+    // Mark the account offline, but keep the account itself.
     int account = session->account_index;
-    cancel_challenges_to(account, outbox);
+
+    if (account >= 0 && account < account_count)
+    {
+        accounts[account].session_index = -1;
+
+        // Cancel challenges targeting this player.
+        cancel_challenges_to(account, outbox);
+    }
+
+    // Clear any outgoing challenge.
     session->challenge_target = -1;
 
-
-    // Free the session slot. Keep its generation for the next connection.
+    // Free the session slot.
+    // Keep its generation for the next connection.
     session->in_use = 0;
     session->account_index = -1;
     session->state = STATE_CONNECTED;
