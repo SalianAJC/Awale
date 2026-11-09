@@ -43,7 +43,8 @@ SERVER_SRC = $(SRC_DIR)/server.c \
              $(SRC_DIR)/server_logic.c
 
 CLIENT_SRC = $(SRC_DIR)/client.c \
-             $(SRC_DIR)/network.c
+             $(SRC_DIR)/network.c \
+             $(SRC_DIR)/game.c
 
 TEST_SRC = $(SRC_DIR)/test_protocol.c \
            $(SRC_DIR)/network.c
