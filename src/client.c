@@ -1,39 +1,45 @@
 #include <stdio.h>
 #include <winsock2.h>
 #include <string.h>
-#include <conio.h>//Reads unentered data
+#include <conio.h> //Reads unentered data
 
 #include "network.h"
 #include "game.h"
 
-int register_acc(SOCKET client_socket){
+int register_acc(SOCKET client_socket)
+{
     char username[MAX_NAME + 2];
     Message message = {0};
     Message response;
 
     printf("Enter username: ");
 
-    if (fgets(username, sizeof(username), stdin) == NULL) {
+    if (fgets(username, sizeof(username), stdin) == NULL)
+    {
         printf("Error reading username.\n");
         return -1;
     }
 
     size_t length = strlen(username);
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
     }
-    else if (!feof(stdin)) {
+    else if (!feof(stdin))
+    {
         int ch;
 
-        while ((ch = getchar()) != '\n' && ch != EOF) {
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
         }
 
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
@@ -44,32 +50,38 @@ int register_acc(SOCKET client_socket){
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", username);
 
-    if (send_message(client_socket, &message) != 0) {
+    if (send_message(client_socket, &message) != 0)
+    {
         printf("Failed to send registration request.\n");
         return -1;
     }
 
-    if (receive_message(client_socket, &response) != 0) {
+    if (receive_message(client_socket, &response) != 0)
+    {
         printf("Failed to receive registration response.\n");
         return -1;
     }
 
-    if (strcmp(response.type, MSG_REGISTER) != 0) {
+    if (strcmp(response.type, MSG_REGISTER) != 0)
+    {
         printf("Unexpected server response.\n");
         return -1;
     }
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("Registration successful!\n");
         return 0;
-    } else {
+    }
+    else
+    {
         printf("Registration failed: %s\n", response.content);
         return -1;
     }
 }
 
-
-int log_in(SOCKET client_socket){
+int log_in(SOCKET client_socket)
+{
     char username[MAX_NAME + 2];
     Message message = {0};
     Message response;
@@ -77,27 +89,32 @@ int log_in(SOCKET client_socket){
 
     printf("Enter username: ");
 
-    if (fgets(username, sizeof(username), stdin) == NULL) {
+    if (fgets(username, sizeof(username), stdin) == NULL)
+    {
         printf("Error reading username.\n");
         return -1;
     }
 
     size_t length = strlen(username);
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
     }
-    else if (!feof(stdin)) {
+    else if (!feof(stdin))
+    {
         int ch;
 
-        while ((ch = getchar()) != '\n' && ch != EOF) {
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
         }
 
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
@@ -108,22 +125,26 @@ int log_in(SOCKET client_socket){
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", username);
 
-    if (send_message(client_socket, &message) != 0) {
+    if (send_message(client_socket, &message) != 0)
+    {
         printf("Failed to send login request.\n");
         return -1;
     }
 
-    if (receive_message(client_socket, &response) != 0) {
+    if (receive_message(client_socket, &response) != 0)
+    {
         printf("Failed to receive login response.\n");
         return -1;
     }
 
-    if (strcmp(response.type, MSG_LOGIN) != 0) {
+    if (strcmp(response.type, MSG_LOGIN) != 0)
+    {
         printf("Unexpected server response.\n");
         return -1;
     }
 
-    if (response.response != RESP_SUCCESS) {
+    if (response.response != RESP_SUCCESS)
+    {
         printf("Login failed: %s\n", response.content);
         return -1;
     }
@@ -131,23 +152,27 @@ int log_in(SOCKET client_socket){
     printf("Login successful!\n");
     printf("Welcome, %s!\n", username);
 
-    if (receive_message(client_socket, &onl_list) != 0) {
+    if (receive_message(client_socket, &onl_list) != 0)
+    {
         printf("Failed to receive online players list.\n");
         return -1;
     }
 
-    if (strcmp(onl_list.type, MSG_PLAYERS_ONLINE) == 0) {
+    if (strcmp(onl_list.type, MSG_PLAYERS_ONLINE) == 0)
+    {
         printf("\n===== ONLINE PLAYERS =====\n");
         printf("%s\n", onl_list.content);
-    } else {
+    }
+    else
+    {
         printf("Unexpected online players response.\n");
     }
 
     return 0;
 }
 
-
-int challenge_player(SOCKET *client_socket){
+int challenge_player(SOCKET *client_socket)
+{
 
     char username[MAX_NAME + 2];
     Message message = {0};
@@ -159,18 +184,21 @@ int challenge_player(SOCKET *client_socket){
     message.receiver = 0;
     message.content[0] = '\0';
 
-    if (send_message(*client_socket, &message) != 0) {
+    if (send_message(*client_socket, &message) != 0)
+    {
         printf("Failed to request online players.\n");
         return -1;
     }
 
-    if (receive_message(*client_socket, &response) != 0) {
+    if (receive_message(*client_socket, &response) != 0)
+    {
         printf("Failed to receive online players.\n");
         return -1;
     }
 
     if (strcmp(response.type, MSG_LIST_ONLINE) != 0 ||
-        response.response != RESP_SUCCESS) {
+        response.response != RESP_SUCCESS)
+    {
         printf("Failed to retrieve online players.\n");
         return -1;
     }
@@ -180,27 +208,32 @@ int challenge_player(SOCKET *client_socket){
 
     printf("\nEnter the username of the player you want to challenge: ");
 
-    if (fgets(username, sizeof(username), stdin) == NULL) {
+    if (fgets(username, sizeof(username), stdin) == NULL)
+    {
         printf("Error reading username.\n");
         return -1;
     }
 
     size_t length = strlen(username);
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
     }
-    else if (!feof(stdin)) {
+    else if (!feof(stdin))
+    {
         int ch;
 
-        while ((ch = getchar()) != '\n' && ch != EOF) {
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
         }
 
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
@@ -213,22 +246,26 @@ int challenge_player(SOCKET *client_socket){
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", username);
 
-    if (send_message(*client_socket, &message) != 0) {
+    if (send_message(*client_socket, &message) != 0)
+    {
         printf("Failed to send challenge request.\n");
         return -1;
     }
 
-    if (receive_message(*client_socket, &response) != 0) {
+    if (receive_message(*client_socket, &response) != 0)
+    {
         printf("Failed to receive challenge response.\n");
         return -1;
     }
 
-    if (strcmp(response.type, MSG_CHALLENGE) != 0) {
+    if (strcmp(response.type, MSG_CHALLENGE) != 0)
+    {
         printf("Unexpected server response.\n");
         return -1;
     }
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("Challenge sent to %s!\n", response.content);
         return 0;
     }
@@ -237,8 +274,8 @@ int challenge_player(SOCKET *client_socket){
     return -1;
 }
 
-
-int respond_to_challenge(SOCKET client_socket, char* challenger){
+int respond_to_challenge(SOCKET client_socket, char *challenger)
+{
 
     char choice[16];
     Message message = {0};
@@ -246,139 +283,195 @@ int respond_to_challenge(SOCKET client_socket, char* challenger){
 
     printf("\nAccept challenge from %s? (y/n): ", challenger);
 
-    //Initial message checks, yes, no, or error
+    // Initial message checks, yes, no, or error
 
-    if (fgets(choice, sizeof(choice), stdin) == NULL) {
+    if (fgets(choice, sizeof(choice), stdin) == NULL)
+    {
         return -1;
     }
 
-    if (choice[0] == 'y' || choice[0] == 'Y') {
+    if (choice[0] == 'y' || choice[0] == 'Y')
+    {
         strcpy(message.type, MSG_ACCEPT);
     }
 
-    else if (choice[0] == 'n' || choice[0] == 'N') {
+    else if (choice[0] == 'n' || choice[0] == 'N')
+    {
         strcpy(message.type, MSG_REFUSE);
     }
 
-    else {
+    else
+    {
         printf("Invalid choice.\n");
         return -1;
     }
 
-    //Socket module
+    // Socket module
 
     message.response = RESP_NONE;
     message.mode = MODE_NONE;
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", challenger);
 
-    //Response checks
+    // Response checks
 
-    if (send_message(client_socket, &message) != 0) {
+    if (send_message(client_socket, &message) != 0)
+    {
         printf("Failed to send challenge response.\n");
         return -1;
     }
 
-    if (receive_message(client_socket, &response) != 0) {
+    if (receive_message(client_socket, &response) != 0)
+    {
         printf("Failed to receive server response.\n");
         return -1;
     }
 
-    if (response.response != RESP_SUCCESS) {
+    if (response.response != RESP_SUCCESS)
+    {
         printf("Challenge response failed: %s\n", response.content);
         return -1;
     }
 
-    if (strcmp(message.type, MSG_ACCEPT) == 0) {
+    if (strcmp(message.type, MSG_ACCEPT) == 0)
+    {
         printf("Challenge accepted!\n");
     }
-    else {
+    else
+    {
         printf("Challenge refused.\n");
     }
 
     return 0;
 }
 
-
-int socket_has_mail(SOCKET client_socket){
+int socket_has_mail(SOCKET client_socket)
+{
 
     fd_set readfds;
 
-    struct timeval timeout; //We create a timeout for answers
+    struct timeval timeout; // We create a timeout for answers
 
     FD_ZERO(&readfds);
     FD_SET(client_socket, &readfds);
 
     timeout.tv_sec = 0;
-    timeout.tv_usec = 100000; //Arbitrary max 100 milisecs
+    timeout.tv_usec = 100000; // Arbitrary max 100 milisecs
 
     int result = select(0, &readfds, NULL, NULL, &timeout);
 
-    if (result == SOCKET_ERROR){
+    if (result == SOCKET_ERROR)
+    {
         return -1;
     }
 
     return result > 0;
 }
 
-
-int read_lobby_choice(char *choice, int size, SOCKET client_socket, Message *game_start) {
+int read_lobby_choice(char *choice, int size, SOCKET client_socket, Message *game_start)
+{
 
     int i = 0;
 
-    while (1) {
+    while (1)
+    {
 
         int socket_status = socket_has_mail(client_socket);
 
-        if (socket_status == -1) {
+        if (socket_status == -1)
+        {
             return -1;
         }
 
-        if (socket_status == 1) {
+        if (socket_status == 1)
+        {
 
             Message incoming = {0};
 
-            if (receive_message(client_socket, &incoming) != 0) {
+            if (receive_message(client_socket, &incoming) != 0)
+            {
                 return -1;
             }
 
-            if (strcmp(incoming.type, MSG_CHALLENGED) == 0) {
+            if (strcmp(incoming.type, MSG_CHALLENGED) == 0)
+            {
                 printf("\nYou have been challenged by %s!\n", incoming.content);
 
-                if (respond_to_challenge(client_socket, incoming.content) != 0) {
+                if (respond_to_challenge(client_socket, incoming.content) != 0)
+                {
                     printf("Could not respond to challenge.\n");
                 }
 
                 printf("\nChoose an option: ");
 
-                for (int j = 0; j < i; j++) {
+                for (int j = 0; j < i; j++)
+                {
                     printf("%c", choice[j]);
                 }
             }
-            else if (strcmp(incoming.type, MSG_GAME_START) == 0) {
+            else if (strcmp(incoming.type, MSG_CHAT) == 0)
+            {
+                if (incoming.response == RESP_NONE)
+                {
+                    printf("\n[CHAT] %s\n", incoming.content);
+                }
+                else if (incoming.response == RESP_SUCCESS)
+                {
+                    printf("\n[CHAT] Message sent.\n");
+                }
+                else
+                {
+                    printf("\n[CHAT] Failed: %s\n", incoming.content);
+                }
+
+                printf("\nChoose an option: ");
+                for (int j = 0; j < i; j++)
+                {
+                    printf("%c", choice[j]);
+                }
+            }
+            else if (strcmp(incoming.type, MSG_REFUSE) == 0 &&
+                     incoming.response == RESP_NONE)
+            {
+                printf("\nYour challenge to %s was refused or cancelled.\n",
+                       incoming.content);
+
+                printf("\nChoose an option: ");
+                for (int j = 0; j < i; j++)
+                {
+                    printf("%c", choice[j]);
+                }
+            }
+            else if (strcmp(incoming.type, MSG_GAME_START) == 0)
+            {
                 *game_start = incoming;
                 return 2;
             }
         }
 
-        if (_kbhit()) {
+        if (_kbhit())
+        {
 
             int ch = _getch();
 
-            if (ch == '\r') {
+            if (ch == '\r')
+            {
                 choice[i] = '\0';
                 printf("\n");
                 return 1;
             }
 
-            if (ch == '\b') {
+            if (ch == '\b')
+            {
 
-                if (i > 0) {
+                if (i > 0)
+                {
                     i--;
                     printf("\b \b");
                 }
-
-            } else if (ch >= 32 && ch <= 126 && i < size - 1) {
+            }
+            else if (ch >= 32 && ch <= 126 && i < size - 1)
+            {
 
                 choice[i++] = (char)ch;
                 printf("%c", ch);
@@ -387,10 +480,10 @@ int read_lobby_choice(char *choice, int size, SOCKET client_socket, Message *gam
     }
 }
 
+int play_game(SOCKET client_socket, int game_id, int side, char *opponent)
+{
 
-int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
-
-    //Create a game, messages and play start
+    // Create a game, messages and play start
     Game game;
     Message message = {0};
     char input[MAX_CONTENT + 1];
@@ -402,93 +495,111 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
     init_game(&game);
     game.id = game_id;
 
-
-    //Presentation and initial board
+    // Presentation and initial board
     printf("\n===== AWALE GAME =====\n");
     printf("Playing against: %s\n", opponent);
     printf("Your side: %d\n", side);
 
     print_board(&game);
 
-    if (game.current_player == side) {
+    if (game.current_player == side)
+    {
         printf("\nEnter a hole (0-11), R to resign, or CH to chat.\n");
         printf("Your move: ");
-    } else {
+    }
+    else
+    {
         printf("\nWaiting for opponent's move...\n");
         printf("Type CH to open the chat.\n");
     }
 
+    // Playball!
+    while (1)
+    {
 
-    //Playball!
-    while (1) {
+        int socket_status = socket_has_mail(client_socket); // Check mail
 
-        int socket_status = socket_has_mail(client_socket);//Check mail
-
-        if (socket_status == -1) {
+        if (socket_status == -1)
+        {
             printf("\nConnection lost.\n");
             return -1;
         }
 
-        if (socket_status == 1) { //Get the message
+        if (socket_status == 1)
+        { // Get the message
 
             Message incoming = {0};
 
-            if (receive_message(client_socket, &incoming) != 0) {
+            if (receive_message(client_socket, &incoming) != 0)
+            {
                 printf("\nFailed to receive game message.\n");
                 return -1;
             }
 
-            //Receive chat messages
-            if (strcmp(incoming.type, MSG_CHAT) == 0) {
+            // Receive chat messages
+            if (strcmp(incoming.type, MSG_CHAT) == 0)
+            {
 
-                if (incoming.response == RESP_NONE) {
+                if (incoming.response == RESP_NONE)
+                {
                     printf("\n[CHAT] %s\n", incoming.content);
                 }
-                else if (incoming.response == RESP_SUCCESS) {
+                else if (incoming.response == RESP_SUCCESS)
+                {
                     printf("\n[CHAT] Message sent.\n");
                 }
-                else {
+                else
+                {
                     printf("\n[CHAT] Failed: %s\n", incoming.content);
                 }
 
-                //Restore current prompt
-                if (chat_mode) {
+                // Restore current prompt
+                if (chat_mode)
+                {
                     printf("Chat: ");
-                    if (input_size > 0) {
+                    if (input_size > 0)
+                    {
                         fwrite(input, 1, input_size, stdout);
                     }
                 }
-                else if (game.current_player == side) {
+                else if (game.current_player == side)
+                {
                     printf("Your move: ");
                 }
-                else {
+                else
+                {
                     printf("Waiting for opponent's move...\n");
                     printf("Type CH to open the chat.\n");
                 }
             }
 
-            else if (strcmp(incoming.type, MSG_BOARD_UPDATE) == 0) { //Update board
+            else if (strcmp(incoming.type, MSG_BOARD_UPDATE) == 0)
+            { // Update board
 
                 int received;
                 int hole;
 
-                if (sscanf(incoming.content, "%d %d", &received, &hole) != 2) {
+                if (sscanf(incoming.content, "%d %d", &received, &hole) != 2)
+                {
                     printf("\nInvalid board update.\n");
                     return -1;
                 }
 
-                if (received != game_id) {
+                if (received != game_id)
+                {
                     continue;
                 }
 
-                if (sow(&game, hole) != 0) {
+                if (sow(&game, hole) != 0)
+                {
                     printf("\nBoard synchronization error.\n");
                     return -1;
                 }
 
                 awaiting_update = 0;
 
-                if (!chat_mode) {
+                if (!chat_mode)
+                {
                     input_size = 0;
                     input[0] = '\0';
                 }
@@ -496,56 +607,71 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 printf("\n");
                 print_board(&game);
 
-                //Keep chat open during board updates
-                if (chat_mode) {
+                // Keep chat open during board updates
+                if (chat_mode)
+                {
                     printf("\nChat: ");
-                    if (input_size > 0) {
+                    if (input_size > 0)
+                    {
                         fwrite(input, 1, input_size, stdout);
                     }
                 }
-                else if (game.current_player == side) {
+                else if (game.current_player == side)
+                {
                     printf("\nYour move: ");
-                } else {
+                }
+                else
+                {
                     printf("\nWaiting for opponent's move...\n");
                     printf("Type CH to open the chat.\n");
                 }
-
             }
 
-            else if (strcmp(incoming.type, MSG_MOVE) == 0) {
+            else if (strcmp(incoming.type, MSG_MOVE) == 0)
+            {
 
-                if (incoming.response == RESP_SUCCESS) {
+                if (incoming.response == RESP_SUCCESS)
+                {
                     printf("\nMove accepted. Waiting for board update...\n");
-                } else {
+                }
+                else
+                {
                     printf("\nInvalid move: %s\n", incoming.content);
                     awaiting_update = 0;
                     input_size = 0;
                     input[0] = '\0';
 
-                    if (game.current_player == side && !resigning) {
+                    if (game.current_player == side && !resigning)
+                    {
                         printf("\nYour move: ");
                     }
                 }
             }
 
-            else if (strcmp(incoming.type, MSG_RESIGN) == 0) {
+            else if (strcmp(incoming.type, MSG_RESIGN) == 0)
+            {
 
-                if (incoming.response != RESP_SUCCESS) {
+                if (incoming.response != RESP_SUCCESS)
+                {
                     printf("\nResignation failed: %s\n", incoming.content);
                     resigning = 0;
                     awaiting_update = 0;
 
-                    if (game.current_player == side) {
+                    if (game.current_player == side)
+                    {
                         printf("\nYour move: ");
                     }
-                } else {
+                }
+                else
+                {
                     printf("\nResignation sent. Waiting for result...\n");
                 }
             }
 
-            else if (strcmp(incoming.type, MSG_GAME_OVER) == 0) {
+            else if (strcmp(incoming.type, MSG_GAME_OVER) == 0)
+            {
 
-                //game summary
+                // game summary
 
                 int received_game;
                 int captures0;
@@ -553,29 +679,34 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 char winner[MAX_NAME + 1];
                 char reason[32];
 
-                //Checks
+                // Checks
 
                 if (sscanf(incoming.content, "%d %d %d %32s %31s",
                            &received_game, &captures0, &captures1,
-                           winner, reason) != 5) {
+                           winner, reason) != 5)
+                {
                     printf("\nInvalid game result.\n");
                     return -1;
                 }
 
-                if (received_game != game_id) {
+                if (received_game != game_id)
+                {
                     continue;
                 }
 
-                //Announce final score and checks
+                // Announce final score and checks
 
                 printf("\n===== GAME OVER =====\n");
                 printf("Final score:\n");
                 printf("Player 0: %d\n", captures0);
                 printf("Player 1: %d\n", captures1);
 
-                if (strcmp(winner, "draw") == 0) {
+                if (strcmp(winner, "draw") == 0)
+                {
                     printf("The game ended in a draw!\n");
-                } else {
+                }
+                else
+                {
                     printf("Winner: %s\n", winner);
                 }
 
@@ -584,42 +715,51 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 return 1;
             }
 
-            else if (strcmp(incoming.type, MSG_OPPONENT_LEFT) == 0) {
+            else if (strcmp(incoming.type, MSG_OPPONENT_LEFT) == 0)
+            {
 
                 printf("\nOpponent left the game.\n");
                 return 1;
             }
         }
 
-        //Read keyboard input without blocking socket messages
-        if (_kbhit() && !awaiting_update && !resigning) {
+        // Read keyboard input without blocking socket messages
+        if (_kbhit() && !awaiting_update && !resigning)
+        {
 
             int ch = _getch();
 
-            if (ch == '\r') {
+            if (ch == '\r')
+            {
 
                 input[input_size] = '\0';
 
-                //Chat mode
-                if (chat_mode) {
+                // Chat mode
+                if (chat_mode)
+                {
 
-                    //Exit chat
+                    // Exit chat
                     if (strcmp(input, "EXIT") == 0 ||
-                        strcmp(input, "exit") == 0) {
+                        strcmp(input, "exit") == 0)
+                    {
 
                         chat_mode = 0;
                         printf("\nLeaving chat.\n");
 
-                        if (game.current_player == side) {
+                        if (game.current_player == side)
+                        {
                             printf("Your move: ");
-                        } else {
+                        }
+                        else
+                        {
                             printf("Waiting for opponent's move...\n");
                             printf("Type CH to open the chat.\n");
                         }
                     }
 
-                    //Send chat message
-                    else if (input_size > 0) {
+                    // Send chat message
+                    else if (input_size > 0)
+                    {
 
                         char chat_content[MAX_NAME + MAX_CHAT + 2];
 
@@ -636,20 +776,23 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                         snprintf(message.content, sizeof(message.content),
                                  "%s", chat_content);
 
-                        if (send_message(client_socket, &message) != 0) {
+                        if (send_message(client_socket, &message) != 0)
+                        {
                             printf("\nFailed to send chat message.\n");
                             return -1;
                         }
                     }
 
-                    if (chat_mode) {
+                    if (chat_mode)
+                    {
                         printf("Chat: ");
                     }
                 }
 
-                //Open chat
+                // Open chat
                 else if (strcmp(input, "CH") == 0 ||
-                         strcmp(input, "ch") == 0) {
+                         strcmp(input, "ch") == 0)
+                {
 
                     chat_mode = 1;
                     printf("\n===== GAME CHAT =====\n");
@@ -657,7 +800,8 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                     printf("Chat: ");
                 }
 
-                else if (game.current_player != side) {
+                else if (game.current_player != side)
+                {
 
                     printf("\nIt's not your turn.\n");
                     printf("Waiting for opponent's move...\n");
@@ -665,9 +809,10 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 }
 
                 else if (strcmp(input, "r") == 0 ||
-                         strcmp(input, "R") == 0) {
+                         strcmp(input, "R") == 0)
+                {
 
-                    //Send resignation
+                    // Send resignation
 
                     memset(&message, 0, sizeof(message));
 
@@ -676,9 +821,10 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                     message.mode = MODE_PLAYER;
                     message.receiver = 0;
 
-                    //Checks
+                    // Checks
 
-                    if (send_message(client_socket, &message) != 0) {
+                    if (send_message(client_socket, &message) != 0)
+                    {
                         printf("\nFailed to send resignation.\n");
                         return -1;
                     }
@@ -689,22 +835,24 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                     printf("\nWaiting for resignation response...\n");
                 }
 
-                else {
+                else
+                {
 
                     int hole;
                     char extra;
 
                     if (sscanf(input, "%d %c", &hole, &extra) != 1 ||
-                        hole < 0 || hole > 11) {
+                        hole < 0 || hole > 11)
+                    {
 
                         printf("\nInvalid hole. Choose between 0 and 11.\n");
                         printf("\nYour move: ");
-
                     }
 
-                    else {
+                    else
+                    {
 
-                        //Send move
+                        // Send move
 
                         memset(&message, 0, sizeof(message));
 
@@ -714,7 +862,8 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                         message.receiver = 0;
                         snprintf(message.content, sizeof(message.content), "%d", hole);
 
-                        if (send_message(client_socket, &message) != 0) {
+                        if (send_message(client_socket, &message) != 0)
+                        {
                             printf("\nFailed to send move.\n");
                             return -1;
                         }
@@ -727,16 +876,19 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 input[0] = '\0';
             }
 
-            else if (ch == '\b') {
+            else if (ch == '\b')
+            {
 
-                if (input_size > 0) {
+                if (input_size > 0)
+                {
                     input_size--;
                     printf("\b \b");
                 }
             }
 
             else if (ch >= 32 && ch <= 126 &&
-                     input_size < (chat_mode ? MAX_CHAT : 15)) {
+                     input_size < (chat_mode ? MAX_CHAT : 15))
+            {
 
                 input[input_size++] = (char)ch;
                 printf("%c", ch);
@@ -745,46 +897,55 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
     }
 }
 
-int write_bio(SOCKET client_socket) {
-    char bio[MAX_CONTENT + 1] = ""; //Max content
-    char line[MAX_BIO_LINE + 2]; //Max bio capacity (10 ascii)
+int write_bio(SOCKET client_socket)
+{
+    char bio[MAX_CONTENT + 1] = ""; // Max content
+    char line[MAX_BIO_LINE + 2];    // Max bio capacity (10 ascii)
     Message message = {0};
     Message response;
     int lines = 0;
 
-    //Menu setup
+    // Menu setup
 
     printf("\n===== WRITE YOUR BIO =====\n");
     printf("Write up to %d lines, with a maximum of %d characters each.\n",
            MAX_BIO_LINES, MAX_BIO_LINE);
     printf("Press Enter on an empty line to finish.\n");
 
-    //Read bio lines
-    while (lines < MAX_BIO_LINES) {
+    // Read bio lines
+    while (lines < MAX_BIO_LINES)
+    {
         printf("Line %d: ", lines + 1);
 
-        if (fgets(line, sizeof(line), stdin) == NULL) {
+        if (fgets(line, sizeof(line), stdin) == NULL)
+        {
             return -1;
         }
 
         size_t length = strlen(line);
 
-        if (length > 0 && line[length - 1] == '\n') {
+        if (length > 0 && line[length - 1] == '\n')
+        {
             line[length - 1] = '\0';
             length--;
-        } else if (!feof(stdin)) {
+        }
+        else if (!feof(stdin))
+        {
             int ch;
-            while ((ch = getchar()) != '\n' && ch != EOF) {
+            while ((ch = getchar()) != '\n' && ch != EOF)
+            {
             }
             printf("Line is too long.\n");
             return -1;
         }
 
-        if (length == 0) {
+        if (length == 0)
+        {
             break;
         }
 
-        if (lines > 0) {
+        if (lines > 0)
+        {
             strcat(bio, ";");
         }
 
@@ -792,31 +953,35 @@ int write_bio(SOCKET client_socket) {
         lines++;
     }
 
-    //Send bio
+    // Send bio
     strcpy(message.type, MSG_WRITE_BIO);
     message.response = RESP_NONE;
     message.mode = MODE_NONE;
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", bio);
 
-    //Checks
+    // Checks
 
-    if (send_message(client_socket, &message) != 0) {
+    if (send_message(client_socket, &message) != 0)
+    {
         printf("Failed to send bio.\n");
         return -1;
     }
 
-    if (receive_message(client_socket, &response) != 0) {
+    if (receive_message(client_socket, &response) != 0)
+    {
         printf("Failed to receive bio response.\n");
         return -1;
     }
 
-    if (strcmp(response.type, MSG_WRITE_BIO) != 0) {
+    if (strcmp(response.type, MSG_WRITE_BIO) != 0)
+    {
         printf("Unexpected server response.\n");
         return -1;
     }
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("Bio updated successfully!\n");
         return 0;
     }
@@ -825,77 +990,88 @@ int write_bio(SOCKET client_socket) {
     return -1;
 }
 
+// Bio reader
 
-//Bio reader
-
-int read_bio(SOCKET client_socket) {
-    char username[MAX_NAME + 2]; //Username
+int read_bio(SOCKET client_socket)
+{
+    char username[MAX_NAME + 2]; // Username
     Message message = {0};
     Message response;
 
     printf("Enter the username whose bio you want to read: ");
 
-    if (fgets(username, sizeof(username), stdin) == NULL) {
+    if (fgets(username, sizeof(username), stdin) == NULL)
+    {
         return -1;
     }
 
     size_t length = strlen(username);
 
-    //Checks
+    // Checks
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
-    } else if (!feof(stdin)) {
+    }
+    else if (!feof(stdin))
+    {
         int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF) {
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
         }
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
 
-    //Send bio request
+    // Send bio request
     strcpy(message.type, MSG_READ_BIO);
     message.response = RESP_NONE;
     message.mode = MODE_NONE;
     message.receiver = 0;
     snprintf(message.content, sizeof(message.content), "%s", username);
 
-
-    //Checks
-    if (send_message(client_socket, &message) != 0) {
+    // Checks
+    if (send_message(client_socket, &message) != 0)
+    {
         printf("Failed to send bio request.\n");
         return -1;
     }
 
-    if (receive_message(client_socket, &response) != 0) {
+    if (receive_message(client_socket, &response) != 0)
+    {
         printf("Failed to receive bio response.\n");
         return -1;
     }
 
-    if (strcmp(response.type, MSG_READ_BIO) != 0) {
+    if (strcmp(response.type, MSG_READ_BIO) != 0)
+    {
         printf("Unexpected server response.\n");
         return -1;
     }
 
-    if (response.response == RESP_SUCCESS) {
-        printf("\n===== PLAYER BIO =====\n");
-        printf("%s\n", response.content);
-        return 0;
+    printf("\n===== PLAYER BIO =====\n");
+
+    /* Convert ';' into a display newline. */
+    for (size_t i = 0; response.content[i] != '\0'; i++)
+    {
+        putchar(response.content[i] == ';' ? '\n' : response.content[i]);
     }
+    putchar('\n');
 
     printf("Could not retrieve bio: %s\n", response.content);
     return -1;
 }
 
+// Adding a friend
 
-//Adding a friend
-
-int add_friend(SOCKET client_socket) {
+int add_friend(SOCKET client_socket)
+{
     char username[MAX_NAME + 2];
     Message message = {0};
     Message response;
@@ -907,16 +1083,22 @@ int add_friend(SOCKET client_socket) {
 
     size_t length = strlen(username);
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
-    } else if (!feof(stdin)) {
+    }
+    else if (!feof(stdin))
+    {
         int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF) {}
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
+        }
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
@@ -928,7 +1110,8 @@ int add_friend(SOCKET client_socket) {
     snprintf(message.content, sizeof(message.content), "%s", username);
 
     if (send_message(client_socket, &message) != 0 ||
-        receive_message(client_socket, &response) != 0) {
+        receive_message(client_socket, &response) != 0)
+    {
         printf("Communication error.\n");
         return -1;
     }
@@ -936,7 +1119,8 @@ int add_friend(SOCKET client_socket) {
     if (strcmp(response.type, MSG_FRIEND_ADD) != 0)
         return -1;
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("%s is now your friend!\n", response.content);
         return 0;
     }
@@ -945,7 +1129,8 @@ int add_friend(SOCKET client_socket) {
     return -1;
 }
 
-int remove_friend(SOCKET client_socket) {
+int remove_friend(SOCKET client_socket)
+{
     char username[MAX_NAME + 2];
     Message message = {0};
     Message response;
@@ -957,16 +1142,22 @@ int remove_friend(SOCKET client_socket) {
 
     size_t length = strlen(username);
 
-    if (length > 0 && username[length - 1] == '\n') {
+    if (length > 0 && username[length - 1] == '\n')
+    {
         username[length - 1] = '\0';
-    } else if (!feof(stdin)) {
+    }
+    else if (!feof(stdin))
+    {
         int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF) {}
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
+        }
         printf("Username is too long.\n");
         return -1;
     }
 
-    if (username[0] == '\0') {
+    if (username[0] == '\0')
+    {
         printf("Username cannot be empty.\n");
         return -1;
     }
@@ -978,7 +1169,8 @@ int remove_friend(SOCKET client_socket) {
     snprintf(message.content, sizeof(message.content), "%s", username);
 
     if (send_message(client_socket, &message) != 0 ||
-        receive_message(client_socket, &response) != 0) {
+        receive_message(client_socket, &response) != 0)
+    {
         printf("Communication error.\n");
         return -1;
     }
@@ -986,7 +1178,8 @@ int remove_friend(SOCKET client_socket) {
     if (strcmp(response.type, MSG_FRIEND_REMOVE) != 0)
         return -1;
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("%s has been removed from your friends.\n", response.content);
         return 0;
     }
@@ -995,7 +1188,8 @@ int remove_friend(SOCKET client_socket) {
     return -1;
 }
 
-int show_friends(SOCKET client_socket) {
+int show_friends(SOCKET client_socket)
+{
     Message message = {0};
     Message response;
 
@@ -1005,7 +1199,8 @@ int show_friends(SOCKET client_socket) {
     message.receiver = 0;
 
     if (send_message(client_socket, &message) != 0 ||
-        receive_message(client_socket, &response) != 0) {
+        receive_message(client_socket, &response) != 0)
+    {
         printf("Communication error.\n");
         return -1;
     }
@@ -1013,7 +1208,8 @@ int show_friends(SOCKET client_socket) {
     if (strcmp(response.type, MSG_FRIEND_LIST) != 0)
         return -1;
 
-    if (response.response == RESP_SUCCESS) {
+    if (response.response == RESP_SUCCESS)
+    {
         printf("\n===== YOUR FRIENDS =====\n");
 
         if (response.content[0] == '\0')
@@ -1028,8 +1224,90 @@ int show_friends(SOCKET client_socket) {
     return -1;
 }
 
+static int lobby_chat(SOCKET client_socket)
+{
+    char username[MAX_NAME + 2];
+    char text[MAX_CHAT + 2];
+    char content[MAX_NAME + MAX_CHAT + 2];
+    Message message = {0};
+    size_t length;
 
-int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, int opponent_size){
+    printf("Send chat to (username): ");
+    if (fgets(username, sizeof(username), stdin) == NULL)
+        return -1;
+
+    length = strlen(username);
+    if (length > 0 && username[length - 1] == '\n')
+    {
+        username[length - 1] = '\0';
+    }
+    else if (!feof(stdin))
+    {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
+        }
+        printf("Username is too long.\n");
+        return -1;
+    }
+
+    if (username[0] == '\0' || strlen(username) > MAX_NAME)
+    {
+        printf("Invalid username.\n");
+        return -1;
+    }
+
+    printf("Message: ");
+    if (fgets(text, sizeof(text), stdin) == NULL)
+        return -1;
+
+    length = strlen(text);
+    if (length > 0 && text[length - 1] == '\n')
+    {
+        text[length - 1] = '\0';
+    }
+    else if (!feof(stdin))
+    {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF)
+        {
+        }
+        printf("Message is too long.\n");
+        return -1;
+    }
+
+    if (text[0] == '\0')
+    {
+        printf("Message cannot be empty.\n");
+        return -1;
+    }
+
+    if (strlen(text) > MAX_CHAT)
+    {
+        printf("Message is too long.\n");
+        return -1;
+    }
+
+    snprintf(content, sizeof(content), "%s %s", username, text);
+
+    strcpy(message.type, MSG_CHAT);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    snprintf(message.content, sizeof(message.content), "%s", content);
+
+    if (send_message(client_socket, &message) != 0)
+    {
+        printf("Failed to send chat message.\n");
+        return -1;
+    }
+
+    printf("Chat request sent. The server will confirm it in the lobby.\n");
+    return 0;
+}
+
+int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, int opponent_size)
+{
 
     char choice[16];
     Message message = {0};
@@ -1037,7 +1315,8 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
     Message game_start = {0};
     int lobby_status;
 
-    while (1) {
+    while (1)
+    {
 
         printf("\n===== LOBBY =====\n");
         printf("1. Show online players\n");
@@ -1047,21 +1326,25 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
         printf("5. Add a friend\n");
         printf("6. Remove a friend\n");
         printf("7. Show friends\n");
-        printf("8. Quit\n");
+        printf("8. Chat with a player\n");
+        printf("9. Quit\n");
         printf("Choose an option: ");
 
         lobby_status = read_lobby_choice(choice, sizeof(choice), client_socket, &game_start);
 
-        if (lobby_status == -1) {
+        if (lobby_status == -1)
+        {
             printf("Connection lost.\n");
             return 0;
         }
 
-        if (lobby_status == 2) {
+        if (lobby_status == 2)
+        {
 
             char *opponent_start;
 
-            if (sscanf(game_start.content, "%d %d", game_id, side) != 2) {
+            if (sscanf(game_start.content, "%d %d", game_id, side) != 2)
+            {
                 printf("Invalid game start message.\n");
                 return 0;
             }
@@ -1069,7 +1352,8 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
             opponent_start = strchr(game_start.content, ' ');
             opponent_start = opponent_start ? strchr(opponent_start + 1, ' ') : NULL;
 
-            if (opponent_start == NULL) {
+            if (opponent_start == NULL)
+            {
                 printf("Invalid opponent information.\n");
                 return 0;
             }
@@ -1085,7 +1369,8 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
             return 2;
         }
 
-        if (strcmp(choice, "1") == 0) {
+        if (strcmp(choice, "1") == 0)
+        {
 
             memset(&message, 0, sizeof(message));
 
@@ -1095,52 +1380,73 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
             message.receiver = 0;
             message.content[0] = '\0';
 
-            if (send_message(client_socket, &message) != 0) {
+            if (send_message(client_socket, &message) != 0)
+            {
                 printf("Failed to request online players.\n");
                 return 0;
             }
 
-            if (receive_message(client_socket, &response) != 0) {
+            if (receive_message(client_socket, &response) != 0)
+            {
                 printf("Failed to receive online players.\n");
                 return 0;
             }
 
             if (strcmp(response.type, MSG_LIST_ONLINE) == 0 &&
-                response.response == RESP_SUCCESS) {
+                response.response == RESP_SUCCESS)
+            {
 
                 printf("\n===== ONLINE PLAYERS =====\n");
                 printf("%s\n", response.content);
-
-            } else {
+            }
+            else
+            {
                 printf("Failed to retrieve online players.\n");
             }
-
-        } else if (strcmp(choice, "2") == 0) {
+        }
+        else if (strcmp(choice, "2") == 0)
+        {
             challenge_player(&client_socket);
-        } else if (strcmp(choice, "3") == 0) {
+        }
+        else if (strcmp(choice, "3") == 0)
+        {
             write_bio(client_socket);
-        } else if (strcmp(choice, "4") == 0) {
+        }
+        else if (strcmp(choice, "4") == 0)
+        {
             read_bio(client_socket);
-        } else if (strcmp(choice, "5") == 0) {
+        }
+        else if (strcmp(choice, "5") == 0)
+        {
             add_friend(client_socket);
-        } else if (strcmp(choice, "6") == 0) {
+        }
+        else if (strcmp(choice, "6") == 0)
+        {
             remove_friend(client_socket);
-        } else if (strcmp(choice, "7") == 0) {
+        }
+        else if (strcmp(choice, "7") == 0)
+        {
             show_friends(client_socket);
-        } else if (strcmp(choice, "8") == 0) {
+        }
+        else if (strcmp(choice, "8") == 0)
+        {
+            lobby_chat(client_socket);
+        }
+
+        else if (strcmp(choice, "9") == 0)
+        {
             return 0;
-        } else {
-            printf("Invalid option. Please try again.\n");
         }
     }
 }
 
-
-int initial_menu(SOCKET client_socket) {
+int initial_menu(SOCKET client_socket)
+{
 
     char choice[16];
 
-    while (1){
+    while (1)
+    {
         printf("Welcome to the game!\n");
         printf("Sam And Omar present:\n");
         printf("\n===== AWALE =====\n");
@@ -1150,33 +1456,37 @@ int initial_menu(SOCKET client_socket) {
         printf("3. Exit\n");
         printf("Choose an option: ");
 
-        if (fgets(choice, sizeof(choice), stdin) == NULL) {
+        if (fgets(choice, sizeof(choice), stdin) == NULL)
+        {
             printf("Error reading input.\n");
             return 0;
         }
 
         // Process the user's choice
-        if (strcmp(choice, "1\n") == 0) {
+        if (strcmp(choice, "1\n") == 0)
+        {
             // Handle registration
             if (register_acc(client_socket) == 0)
             {
                 printf("\nReturning to main menu...\n");
             }
             continue;
-
-        } else if (strcmp(choice, "2\n") == 0) {
+        }
+        else if (strcmp(choice, "2\n") == 0)
+        {
             return 2;
-
-        } else if (strcmp(choice, "3\n") == 0) {
+        }
+        else if (strcmp(choice, "3\n") == 0)
+        {
             // Handle exit
             return 0;
-
-        } else {
+        }
+        else
+        {
             printf("Invalid option. Please try again.\n");
         }
     }
 }
-
 
 int main(void)
 {
@@ -1187,14 +1497,16 @@ int main(void)
     int side;
     char opponent[MAX_NAME + 1];
 
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+    {
         printf("Winsock initialization failed.\n");
         return 1;
     }
 
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
 
-    if (client_socket == INVALID_SOCKET) {
+    if (client_socket == INVALID_SOCKET)
+    {
         printf("Socket creation failed.\n");
         WSACleanup();
         return 1;
@@ -1206,7 +1518,8 @@ int main(void)
     server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     if (connect(client_socket, (struct sockaddr *)&server_addr,
-                sizeof(server_addr)) == SOCKET_ERROR) {
+                sizeof(server_addr)) == SOCKET_ERROR)
+    {
         printf("Connection failed: %d\n", WSAGetLastError());
         closesocket(client_socket);
         WSACleanup();
@@ -1217,20 +1530,25 @@ int main(void)
 
     int menu_choice = initial_menu(client_socket);
 
-    if (menu_choice == 2) {
-        if (log_in(client_socket) == 0) {
+    if (menu_choice == 2)
+    {
+        if (log_in(client_socket) == 0)
+        {
             printf("\nLogin completed. Welcome to the lobby!\n");
 
-            while (1) {
+            while (1)
+            {
 
                 int lobby_status = lobby_menu(client_socket, &game_id, &side,
-                                               opponent, sizeof(opponent));
+                                              opponent, sizeof(opponent));
 
-                if (lobby_status != 2) {
+                if (lobby_status != 2)
+                {
                     break;
                 }
 
-                if (play_game(client_socket, game_id, side, opponent) == -1) {
+                if (play_game(client_socket, game_id, side, opponent) == -1)
+                {
                     break;
                 }
             }

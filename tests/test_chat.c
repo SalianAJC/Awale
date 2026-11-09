@@ -151,6 +151,10 @@ int main(void)
     //------------------------------------------------------------
     printf("-- Setup\n");
 
+    /* Use isolated persistence files and start each test from a clean state. */
+    remove(USERS_FILE);
+    remove(FRIENDS_FILE);
+
     report(logic_init() == 0, "logic_init", "");
 
     int ok = login_player(&alice) == 0 &&
@@ -162,6 +166,28 @@ int main(void)
         printf("\nCannot continue without the players.\n");
         return 1;
     }
+
+    //------------------------------------------------------------
+    printf("\n-- Bio: multi-line bio stays protocol-safe\n");
+
+    send_request(alice.session, MSG_WRITE_BIO,
+                 "Hello;I like Awale", &outbox);
+
+    const OutboxEntry *bio_write =
+        find_entry(&outbox, alice.session, MSG_WRITE_BIO);
+
+    report(entry_is(bio_write, &alice, RESP_SUCCESS, MODE_NONE,
+                    "bio updated"),
+           "write multi-line bio", "");
+
+    send_request(bob.session, MSG_READ_BIO, "alice", &outbox);
+
+    const OutboxEntry *bio_read =
+        find_entry(&outbox, bob.session, MSG_READ_BIO);
+
+    report(entry_is(bio_read, &bob, RESP_SUCCESS, MODE_NONE,
+                    "Hello;I like Awale"),
+           "read bio without wire newline", "");
 
     //------------------------------------------------------------
     printf("\n-- M: bad format\n");
@@ -181,7 +207,7 @@ int main(void)
     //------------------------------------------------------------
     printf("\n-- M: message too long\n");
 
-    char long_message[MAX_CHAT + 2];
+    char long_message[MAX_NAME + MAX_CHAT + 2];
 
     long_message[0] = 'b';
     long_message[1] = 'o';

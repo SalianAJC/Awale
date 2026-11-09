@@ -46,7 +46,7 @@ CLIENT_SRC = $(SRC_DIR)/client.c \
              $(SRC_DIR)/network.c \
              $(SRC_DIR)/game.c
 
-TEST_SRC = $(SRC_DIR)/test_protocol.c \
+TEST_SRC = tests/test_protocol.c \
            $(SRC_DIR)/network.c
 
 # ==========================================
@@ -113,5 +113,27 @@ clean:
 # ==========================================
 # PHONY TARGETS
 # ==========================================
+
+
+# Server-logic tests use separate persistence files.
+TEST_LOGIC_SRC = $(SRC_DIR)/server_logic.c $(SRC_DIR)/game.c
+
+$(TARGET_DIR)/test_registration.exe: tests/test_registration.c $(TEST_LOGIC_SRC) | $(TARGET_DIR)
+	$(CC) $(CFLAGS) -DUSERS_FILE=\"$(TARGET_DIR)/test_registration_users.txt\" -DFRIENDS_FILE=\"$(TARGET_DIR)/test_registration_friends.txt\" $^ -o $@ $(LDLIBS)
+
+$(TARGET_DIR)/test_move.exe: tests/test_move.c $(TEST_LOGIC_SRC) | $(TARGET_DIR)
+	$(CC) $(CFLAGS) -DUSERS_FILE=\"$(TARGET_DIR)/test_move_users.txt\" -DFRIENDS_FILE=\"$(TARGET_DIR)/test_move_friends.txt\" $^ -o $@ $(LDLIBS)
+
+$(TARGET_DIR)/test_challenge.exe: tests/test_challenge.c $(TEST_LOGIC_SRC) | $(TARGET_DIR)
+	$(CC) $(CFLAGS) -DUSERS_FILE=\"$(TARGET_DIR)/test_challenge_users.txt\" -DFRIENDS_FILE=\"$(TARGET_DIR)/test_challenge_friends.txt\" $^ -o $@ $(LDLIBS)
+
+$(TARGET_DIR)/test_chat.exe: tests/test_chat.c $(TEST_LOGIC_SRC) | $(TARGET_DIR)
+	$(CC) $(CFLAGS) -DUSERS_FILE=\"$(TARGET_DIR)/test_chat_users.txt\" -DFRIENDS_FILE=\"$(TARGET_DIR)/test_chat_friends.txt\" $^ -o $@ $(LDLIBS)
+
+test-logic: $(TARGET_DIR)/test_registration.exe $(TARGET_DIR)/test_move.exe $(TARGET_DIR)/test_challenge.exe $(TARGET_DIR)/test_chat.exe
+	$(RUN) $(PATH_PREFIX)$(TARGET_DIR)/test_registration.exe
+	$(RUN) $(PATH_PREFIX)$(TARGET_DIR)/test_move.exe
+	$(RUN) $(PATH_PREFIX)$(TARGET_DIR)/test_challenge.exe
+	$(RUN) $(PATH_PREFIX)$(TARGET_DIR)/test_chat.exe
 
 .PHONY: all run run-server run-client test clean

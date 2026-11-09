@@ -214,6 +214,10 @@ int main(void)
     //------------------------------------------------------------
     printf("-- Setup\n");
 
+    /* Use isolated persistence files and start each test from a clean state. */
+    remove(USERS_FILE);
+    remove(FRIENDS_FILE);
+
     report(logic_init() == 0, "logic_init", "");
 
     int ok = login_player(&alice) == 0 &&

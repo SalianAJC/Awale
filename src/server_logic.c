@@ -319,7 +319,7 @@ static int find_free_friend_slot(const Account *account)
 
 static int load_friends(void)
 {
-    FILE *file = fopen("friends.txt", "r");
+    FILE *file = fopen(FRIENDS_FILE, "r");
 
     if (file == NULL) {
         if (errno == ENOENT)
@@ -381,7 +381,7 @@ static int load_friends(void)
 
 static int save_friends(void)
 {
-    FILE *file = fopen("friends.txt", "w");
+    FILE *file = fopen(FRIENDS_FILE, "w");
 
     if (file == NULL)
         return -1;
@@ -417,7 +417,7 @@ static int has_only_legal_characters(const char *username);
 
 static int load_accounts(void)
 {
-    FILE *file = fopen("users.txt", "r");
+    FILE *file = fopen(USERS_FILE, "r");
 
     if (file == NULL) {
         if (errno == ENOENT)
@@ -479,7 +479,7 @@ static int load_accounts(void)
 
 static int save_account(const Account *account)
 {
-    FILE *file = fopen("users.txt", "a");
+    FILE *file = fopen(USERS_FILE, "a");
 
     if (file == NULL)
         return -1;
@@ -1510,10 +1510,14 @@ static void handle_read_bio(int session, const Message *request,
             : accounts[account].bio[i];
     }
 
-    bio[j] = '\0';
+    /*
+ * Keep the line separator on the wire. Newlines terminate protocol
+ * messages, so the client converts ';' to a display newline.
+ */
+    snprintf(bio, sizeof(bio), "%s", accounts[account].bio);
 
     reply(outbox, session, MSG_READ_BIO,
-          RESP_SUCCESS, bio);
+      RESP_SUCCESS, bio);
 }
 
 // ================================================================

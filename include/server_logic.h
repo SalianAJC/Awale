@@ -5,6 +5,18 @@
 #define SERVER_LOGIC_H
 
 #include "protocol.h"
+/*
+ * Persistent account files.
+ * Tests can override these paths so they never modify real account files.
+ */
+#ifndef USERS_FILE
+#define USERS_FILE "users.txt"
+#endif
+
+#ifndef FRIENDS_FILE
+#define FRIENDS_FILE "friends.txt"
+#endif
+
 
 //At most one message per connected client, plus a few extra for the sender
 //(for example the login reply followed by the S push)
