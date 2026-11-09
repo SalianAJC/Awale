@@ -28,6 +28,7 @@
 
 static Account accounts[MAX_CLIENTS];
 static int account_count = 0;
+static int next_player_id = 1;
 
 static Match matches[MAX_GAMES];
 static Session sessions[MAX_CLIENTS];
@@ -282,6 +283,96 @@ static int find_account(const char *username)
     return -1;
 }
 
+//Loads accounts from the local txt file to avoid constant registration
+
+static int load_accounts(void)
+{
+    FILE *file = fopen("users.txt", "r");
+
+    if (file == NULL) {
+        if (errno == ENOENT)
+            return 0;
+
+        return -1;
+    }
+
+    char line[128];
+    int max_id = 0;
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        int id;
+        int rating;
+        char username[MAX_NAME + 1];
+        char extra;
+
+        if (sscanf(line, "%d|%32[^|]|%d %c",
+                   &id, username, &rating, &extra) != 3)
+            continue;
+
+        if (id <= 0 || rating < 0)
+            continue;
+
+        if (strlen(username) == 0 ||
+            !has_only_legal_characters(username))
+            continue;
+
+        if (account_count >= MAX_CLIENTS)
+            break;
+
+        if (find_account(username) != -1)
+            continue;
+
+        Account *account = &accounts[account_count];
+
+        memset(account, 0, sizeof(*account));
+
+        account->player_id = id;
+        account->session_index = -1;
+        account->rating = rating;
+
+        memcpy(account->username, username, strlen(username) + 1);
+
+        if (id > max_id)
+            max_id = id;
+
+        account_count++;
+    }
+
+    fclose(file);
+
+    next_player_id = max_id + 1;
+
+    return 0;
+}
+
+//Saves an account to the txt databank
+
+static int save_account(const Account *account)
+{
+    FILE *file = fopen("users.txt", "a");
+
+    if (file == NULL)
+        return -1;
+
+    int result = fprintf(
+        file,
+        "%d|%s|%d\n",
+        account->player_id,
+        account->username,
+        account->rating
+    );
+
+    if (result < 0) {
+        fclose(file);
+        return -1;
+    }
+
+    if (fclose(file) != 0)
+        return -1;
+
+    return 0;
+}
+
 
 // Returns 1 if the username contains only letters, digits and '_'.
 static int has_only_legal_characters(const char *username)
@@ -310,7 +401,7 @@ static void notify_match(Outbox *outbox, int m,
                          const char *type, const char *content,
                          int skip_session)
 {
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 2; i++) 
     {
         int account = matches[m].side_account[i];
         int session = accounts[account].session_index;
@@ -476,13 +567,27 @@ static void handle_register(
 
     memset(account, 0, sizeof(*account));
 
-    account->player_id = account_count + 1;
+    account->player_id = next_player_id;
     account->session_index = -1;
     account->rating = START_RATING;
 
     memcpy(account->username, username, length + 1);
 
+    if (save_account(account) != 0) {
+        memset(account, 0, sizeof(*account));
+
+        reply(
+            outbox,
+            session,
+            MSG_REGISTER,
+            RESP_FAILURE,
+            "could not save account"
+        );
+        return;
+    }
+
     account_count++;
+    next_player_id++;
 
     reply(
         outbox,
@@ -1121,6 +1226,12 @@ int logic_init(void)
 
     // No other threads exist yet, so no lock is needed here.
     account_count = 0;
+    next_player_id = 1;
+
+    if (load_accounts() != 0) {
+        DeleteCriticalSection(&logic_lock);
+        return -1;
+    }
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         sessions[i].in_use = 0;
