@@ -2,7 +2,7 @@
 
 A client/server Awalé (Oware) game in C. Players register with a username, see who is online, challenge each other, play full games with the rules checked by the server, chat, write a bio, manage a friends list and climb an ELO ranking.
 
-Authors: Omar ______ and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau.
+Authors: Omar HOLEIHEL and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau.
 
 ---
 

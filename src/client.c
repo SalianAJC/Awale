@@ -1380,7 +1380,6 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
         printf("6. Remove a friend\n");
         printf("7. Show friends\n");
         printf("8. Chat with a player\n");
-        printf("8. Chat with a player\n");
         printf("9. Show player ranking\n");
         printf("10. Quit\n");
         printf("Choose an option: ");
