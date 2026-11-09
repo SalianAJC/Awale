@@ -637,6 +637,287 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
     }
 }
 
+int write_bio(SOCKET client_socket) {
+    char bio[MAX_CONTENT + 1] = ""; //Max content
+    char line[MAX_BIO_LINE + 2]; //Max bio capacity (10 ascii)
+    Message message = {0};
+    Message response;
+    int lines = 0;
+
+    //Menu setup
+
+    printf("\n===== WRITE YOUR BIO =====\n");
+    printf("Write up to %d lines, with a maximum of %d characters each.\n",
+           MAX_BIO_LINES, MAX_BIO_LINE);
+    printf("Press Enter on an empty line to finish.\n");
+
+    //While the lines are les sthan the max
+    while (lines < MAX_BIO_LINES) {
+        printf("Line %d: ", lines + 1);
+
+        if (fgets(line, sizeof(line), stdin) == NULL) {//If it's null error
+            return -1;
+        }
+
+        size_t length = strlen(line); 
+
+        if (length > 0 && line[length - 1] == '\n') {
+            line[length - 1] = '\0';
+            length--;
+        } else if (!feof(stdin)) {
+            int ch;
+            while ((ch = getchar()) != '\n' && ch != EOF) {
+            }
+            printf("Line is too long.\n");
+            return -1;
+        }
+
+        if (length == 0) {
+            break;
+        }
+
+        if (lines > 0) {
+            strcat(bio, ";");
+        }
+
+        strcat(bio, line);
+        lines++;
+    }
+
+    // Sender module
+    strcpy(message.type, MSG_WRITE_BIO);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    snprintf(message.content, sizeof(message.content), "%s", bio);
+
+    //Checks
+
+    if (send_message(client_socket, &message) != 0) {
+        printf("Failed to send bio.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, &response) != 0) {
+        printf("Failed to receive bio response.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_WRITE_BIO) != 0) {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (response.response == RESP_SUCCESS) {
+        printf("Bio updated successfully!\n");
+        return 0;
+    }
+
+    printf("Bio update failed: %s\n", response.content);
+    return -1;
+}
+
+//Bio reader
+
+int read_bio(SOCKET client_socket) {
+    char username[MAX_NAME + 2]; //Username
+    Message message = {0}; 
+    Message response;
+
+    printf("Enter the username whose bio you want to read: "); 
+
+    if (fgets(username, sizeof(username), stdin) == NULL) {//If the username's null we die
+        return -1;
+    }
+
+    size_t length = strlen(username);
+
+    //Checks
+
+    if (length > 0 && username[length - 1] == '\n') {
+        username[length - 1] = '\0';
+    } else if (!feof(stdin)) {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {
+        }
+        printf("Username is too long.\n");
+        return -1;
+    }
+
+    if (username[0] == '\0') {
+        printf("Username cannot be empty.\n");
+        return -1;
+    }
+
+    //Bio request sending module
+    strcpy(message.type, MSG_READ_BIO);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    snprintf(message.content, sizeof(message.content), "%s", username);
+
+
+    //Checks
+    if (send_message(client_socket, &message) != 0) {
+        printf("Failed to send bio request.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, &response) != 0) {
+        printf("Failed to receive bio response.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_READ_BIO) != 0) {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (response.response == RESP_SUCCESS) {
+        printf("\n===== PLAYER BIO =====\n");
+        printf("%s\n", response.content);
+        return 0;
+    }
+
+    printf("Could not retrieve bio: %s\n", response.content);
+    return -1;
+}
+
+//Adding a friend
+
+int add_friend(SOCKET client_socket) {
+    char username[MAX_NAME + 2];
+    Message message = {0};
+    Message response;
+
+    printf("Enter the username of the player to add: ");
+
+    if (fgets(username, sizeof(username), stdin) == NULL)
+        return -1;
+
+    size_t length = strlen(username);
+
+    if (length > 0 && username[length - 1] == '\n') {
+        username[length - 1] = '\0';
+    } else if (!feof(stdin)) {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {}
+        printf("Username is too long.\n");
+        return -1;
+    }
+
+    if (username[0] == '\0') {
+        printf("Username cannot be empty.\n");
+        return -1;
+    }
+
+    strcpy(message.type, MSG_FRIEND_ADD);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    snprintf(message.content, sizeof(message.content), "%s", username);
+
+    if (send_message(client_socket, &message) != 0 ||
+        receive_message(client_socket, &response) != 0) {
+        printf("Communication error.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_FRIEND_ADD) != 0)
+        return -1;
+
+    if (response.response == RESP_SUCCESS) {
+        printf("%s is now your friend!\n", response.content);
+        return 0;
+    }
+
+    printf("Could not add friend: %s\n", response.content);
+    return -1;
+}
+
+int remove_friend(SOCKET client_socket) {
+    char username[MAX_NAME + 2];
+    Message message = {0};
+    Message response;
+
+    printf("Enter the username of the friend to remove: ");
+
+    if (fgets(username, sizeof(username), stdin) == NULL)
+        return -1;
+
+    size_t length = strlen(username);
+
+    if (length > 0 && username[length - 1] == '\n') {
+        username[length - 1] = '\0';
+    } else if (!feof(stdin)) {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {}
+        printf("Username is too long.\n");
+        return -1;
+    }
+
+    if (username[0] == '\0') {
+        printf("Username cannot be empty.\n");
+        return -1;
+    }
+
+    strcpy(message.type, MSG_FRIEND_REMOVE);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    snprintf(message.content, sizeof(message.content), "%s", username);
+
+    if (send_message(client_socket, &message) != 0 ||
+        receive_message(client_socket, &response) != 0) {
+        printf("Communication error.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_FRIEND_REMOVE) != 0)
+        return -1;
+
+    if (response.response == RESP_SUCCESS) {
+        printf("%s has been removed from your friends.\n", response.content);
+        return 0;
+    }
+
+    printf("Could not remove friend: %s\n", response.content);
+    return -1;
+}
+
+int show_friends(SOCKET client_socket) {
+    Message message = {0};
+    Message response;
+
+    strcpy(message.type, MSG_FRIEND_LIST);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+
+    if (send_message(client_socket, &message) != 0 ||
+        receive_message(client_socket, &response) != 0) {
+        printf("Communication error.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_FRIEND_LIST) != 0)
+        return -1;
+
+    if (response.response == RESP_SUCCESS) {
+        printf("\n===== YOUR FRIENDS =====\n");
+
+        if (response.content[0] == '\0')
+            printf("You have no friends yet.\n");
+        else
+            printf("%s\n", response.content);
+
+        return 0;
+    }
+
+    printf("Could not retrieve friends: %s\n", response.content);
+    return -1;
+}
+
 
 int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, int opponent_size){
 
@@ -648,11 +929,14 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
 
     while (1) {
 
-        printf("\n===== AWALE LOBBY =====\n");
         printf("1. Show online players\n");
         printf("2. Challenge a player\n");
-        printf("3. Quit\n");
-        printf("Choose an option: ");
+        printf("3. Write your bio\n");
+        printf("4. Read a player's bio\n");
+        printf("5. Add a friend\n");
+        printf("6. Remove a friend\n");
+        printf("7. Show friends\n");
+        printf("8. Quit\n");
 
         lobby_status = read_lobby_choice(choice, sizeof(choice), client_socket, &game_start);
 
@@ -720,13 +1004,19 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
             }
 
         } else if (strcmp(choice, "2") == 0) {
-
             challenge_player(&client_socket);
-
         } else if (strcmp(choice, "3") == 0) {
-
+            write_bio(client_socket);
+        } else if (strcmp(choice, "4") == 0) {
+            read_bio(client_socket);
+        } else if (strcmp(choice, "5") == 0) {
+            add_friend(client_socket);
+        } else if (strcmp(choice, "6") == 0) {
+            remove_friend(client_socket);
+        } else if (strcmp(choice, "7") == 0) {
+            show_friends(client_socket);
+        } else if (strcmp(choice, "8") == 0) {
             return 0;
-
         } else {
             printf("Invalid option. Please try again.\n");
         }
