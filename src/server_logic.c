@@ -283,6 +283,134 @@ static int find_account(const char *username)
     return -1;
 }
 
+//Finds an account by player id within the txt
+
+static int find_account_by_id(int player_id)
+{
+    for (int i = 0; i < account_count; i++) {
+        if (accounts[i].player_id == player_id)
+            return i;
+    }
+
+    return -1;
+}
+
+static int find_friend_slot(const Account *account, int friend_id)
+{
+    for (int i = 0; i < MAX_FRIENDS; i++) {
+        if (account->friends_ids[i] == friend_id)
+            return i;
+    }
+
+    return -1;
+}
+
+static int find_free_friend_slot(const Account *account)
+{
+    for (int i = 0; i < MAX_FRIENDS; i++) {
+        if (account->friends_ids[i] == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+//Loads the friends list
+
+static int load_friends(void)
+{
+    FILE *file = fopen("friends.txt", "r");
+
+    if (file == NULL) {
+        if (errno == ENOENT)
+            return 0;
+
+        return -1;
+    }
+
+    char line[1024];
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char *username = strtok(line, "|\r\n");
+
+        if (username == NULL)
+            continue;
+
+        int account_index = find_account(username);
+
+        if (account_index == -1)
+            continue;
+
+        char *friend_name;
+
+        while ((friend_name = strtok(NULL, "|\r\n")) != NULL) {
+            int friend_index = find_account(friend_name);
+
+            if (friend_index == -1 || friend_index == account_index)
+                continue;
+
+            Account *account = &accounts[account_index];
+            int friend_id = accounts[friend_index].player_id;
+            int exists = 0;
+
+            for (int i = 0; i < MAX_FRIENDS; i++) {
+                if (account->friends_ids[i] == friend_id) {
+                    exists = 1;
+                    break;
+                }
+            }
+
+            if (exists)
+                continue;
+
+            for (int i = 0; i < MAX_FRIENDS; i++) {
+                if (account->friends_ids[i] == 0) {
+                    account->friends_ids[i] = friend_id;
+                    break;
+                }
+            }
+        }
+    }
+
+    fclose(file);
+
+    return 0;
+}
+
+//Save friends
+
+static int save_friends(void)
+{
+    FILE *file = fopen("friends.txt", "w");
+
+    if (file == NULL)
+        return -1;
+
+    for (int i = 0; i < account_count; i++) {
+        fprintf(file, "%s", accounts[i].username);
+
+        for (int j = 0; j < MAX_FRIENDS; j++) {
+            int friend_id = accounts[i].friends_ids[j];
+
+            if (friend_id == 0)
+                continue;
+
+            int friend_index = find_account_by_id(friend_id);
+
+            if (friend_index != -1) {
+                fprintf(file, "|%s", accounts[friend_index].username);
+            }
+        }
+
+        fprintf(file, "\n");
+    }
+
+    if (fclose(file) != 0)
+        return -1;
+
+    return 0;
+}
+
 //Loads accounts from the local txt file to avoid constant registration
 
 static int load_accounts(void)
@@ -1148,6 +1276,156 @@ static void handle_chat(int session_index, const Message *message,
          MSG_CHAT, MODE_NONE, out);
 }
 
+static void handle_friend_add(int session, const Message *request,
+                              Outbox *outbox)
+{
+    int me = sessions[session].account_index;
+    int target = find_account(request->content);
+
+    if (target == -1) {
+        reply(outbox, session, MSG_FRIEND_ADD,
+              RESP_FAILURE, "unknown user");
+        return;
+    }
+
+    if (target == me) {
+        reply(outbox, session, MSG_FRIEND_ADD,
+              RESP_FAILURE, "cannot add yourself");
+        return;
+    }
+
+       int my_id = accounts[me].player_id;
+    int target_id = accounts[target].player_id;
+
+    int my_slot = find_friend_slot(&accounts[me], target_id);
+    int target_slot = find_friend_slot(&accounts[target], my_id);
+
+    if (my_slot != -1 && target_slot != -1) {
+        reply(outbox, session, MSG_FRIEND_ADD,
+              RESP_FAILURE, "already friends");
+        return;
+    }
+
+    int new_my_slot = my_slot == -1;
+    int new_target_slot = target_slot == -1;
+
+    if (new_my_slot)
+        my_slot = find_free_friend_slot(&accounts[me]);
+
+    if (new_target_slot)
+        target_slot = find_free_friend_slot(&accounts[target]);
+
+    if (my_slot == -1 || target_slot == -1) {
+        reply(outbox, session, MSG_FRIEND_ADD,
+              RESP_FAILURE, "friend list full");
+        return;
+    }
+
+    accounts[me].friends_ids[my_slot] = target_id;
+    accounts[target].friends_ids[target_slot] = my_id;
+
+    if (save_friends() != 0) {
+        if (new_my_slot)
+            accounts[me].friends_ids[my_slot] = 0;
+
+        if (new_target_slot)
+            accounts[target].friends_ids[target_slot] = 0;
+
+        reply(outbox, session, MSG_FRIEND_ADD,
+              RESP_FAILURE, "could not save friends");
+        return;
+    }
+
+    reply(outbox, session, MSG_FRIEND_ADD,
+          RESP_SUCCESS, accounts[target].username);
+}
+
+static void handle_friend_remove(int session, const Message *request,
+                                 Outbox *outbox)
+{
+    int me = sessions[session].account_index;
+    int target = find_account(request->content);
+
+    if (target == -1) {
+        reply(outbox, session, MSG_FRIEND_REMOVE,
+              RESP_FAILURE, "unknown user");
+        return;
+    }
+
+    if (target == me) {
+        reply(outbox, session, MSG_FRIEND_REMOVE,
+              RESP_FAILURE, "cannot remove yourself");
+        return;
+    }
+
+    int my_id = accounts[me].player_id;
+    int target_id = accounts[target].player_id;
+
+    int my_slot = find_friend_slot(&accounts[me], target_id);
+    int target_slot = find_friend_slot(&accounts[target], my_id);
+
+    if (my_slot == -1 && target_slot == -1) {
+        reply(outbox, session, MSG_FRIEND_REMOVE,
+              RESP_FAILURE, "not friends");
+        return;
+    }
+
+    if (my_slot != -1)
+        accounts[me].friends_ids[my_slot] = 0;
+
+    if (target_slot != -1)
+        accounts[target].friends_ids[target_slot] = 0;
+
+    if (save_friends() != 0) {
+        if (my_slot != -1)
+            accounts[me].friends_ids[my_slot] = target_id;
+
+        if (target_slot != -1)
+            accounts[target].friends_ids[target_slot] = my_id;
+
+        reply(outbox, session, MSG_FRIEND_REMOVE,
+              RESP_FAILURE, "could not save friends");
+        return;
+    }
+
+    reply(outbox, session, MSG_FRIEND_REMOVE,
+          RESP_SUCCESS, accounts[target].username);
+}
+
+static void handle_friend_list(int session, const Message *request,
+                               Outbox *outbox)
+{
+    (void)request;
+
+    int me = sessions[session].account_index;
+    char list[MAX_CONTENT + 1] = "";
+
+    for (int i = 0; i < MAX_FRIENDS; i++) {
+        int friend_id = accounts[me].friends_ids[i];
+
+        if (friend_id == 0)
+            continue;
+
+        int friend_index = find_account_by_id(friend_id);
+
+        if (friend_index == -1)
+            continue;
+
+        size_t current_length = strlen(list);
+
+        snprintf(
+            list + current_length,
+            sizeof(list) - current_length,
+            "%s%s",
+            current_length > 0 ? "," : "",
+            accounts[friend_index].username
+        );
+    }
+
+    reply(outbox, session, MSG_FRIEND_LIST,
+          RESP_SUCCESS, list);
+}
+
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -1196,6 +1474,11 @@ static const MessageRule message_table[] = {
 
     // Chat
     { MSG_CHAT,      ALLOW_LOGGED_IN, handle_chat },
+
+    // Friends
+    { MSG_FRIEND_ADD,    ALLOW_LOGGED_IN, handle_friend_add },
+    { MSG_FRIEND_REMOVE, ALLOW_LOGGED_IN, handle_friend_remove },
+    { MSG_FRIEND_LIST,   ALLOW_LOGGED_IN, handle_friend_list },
 };
 
 
@@ -1232,6 +1515,10 @@ int logic_init(void)
         DeleteCriticalSection(&logic_lock);
         return -1;
     }
+
+    if (load_friends() != 0) {
+    DeleteCriticalSection(&logic_lock);
+    return -1;}
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         sessions[i].in_use = 0;

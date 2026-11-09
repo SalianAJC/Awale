@@ -95,7 +95,7 @@ Every field travels as text, never as a raw struct or a pointer.
 #define MSG_STOP_OBSERVE "Ox" //stop watching
 #define MSG_CHAT "M"
 #define MAX_CHAT 200
-#define MSG_FRIEND ADD "Fa"
+#define MSG_FRIEND_ADD "Fa"
 #define MSG_FRIEND_REMOVE "Fr"
 #define MSG_FRIEND_LIST "Fl"
 #define MSG_PRIVATE "Pv"
