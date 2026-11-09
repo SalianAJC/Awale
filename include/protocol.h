@@ -89,6 +89,23 @@ Every field travels as text, never as a raw struct or a pointer.
 #define MSG_WRITE_BIO "W" //C->S : bio text
 #define MSG_READ_BIO "Rb" //C->S request, S->C reply : username, then the bio ("no bio" if empty)
 
+
+// Resign, challenge, observe and Friedns
+#define MSG_RESIGN "Rs" // in game, give up
+#define MSG_STOP_OBSERVE "Ox" //stop watching
+#define MSG_CHAT "M"
+#define MAX_CHAT 200
+#define MSG_FRIEND ADD "Fa"
+#define MSG_FRIEND_REMOVE "Fr"
+#define MSG_FRIEND_LIST "Fl"
+#define MSG_PRIVATE "Pv"
+#define MSG_HISTORY_LIST "Hl"
+#define MSG_RANKING "Rk"
+#define MAX_BIO_LINES 10
+#define MAX_BIO_LINE 80
+#define BIO_SEP ';'
+#define MAX_SAVED_GAMES 100
+#define START_RATING 1200
 //Envelope
 
 typedef struct {
