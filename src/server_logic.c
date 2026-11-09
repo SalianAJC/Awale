@@ -1428,6 +1428,94 @@ static void handle_friend_list(int session, const Message *request,
           RESP_SUCCESS, list);
 }
 
+static void handle_write_bio(int session, const Message *request,
+                             Outbox *outbox)
+{
+    int me = sessions[session].account_index;
+    const char *bio = request->content;
+    size_t length = strlen(bio);
+    int lines = 0;
+    size_t line_length = 0;
+
+    // Validate bio format
+    if (length >= sizeof(accounts[me].bio)) {
+        reply(outbox, session, MSG_WRITE_BIO,
+              RESP_FAILURE, "bio too long");
+        return;
+    }
+
+    for (size_t i = 0; i <= length; i++) {
+        if (bio[i] == ';' || bio[i] == '\0') {
+            if (line_length == 0 && length > 0) {
+                reply(outbox, session, MSG_WRITE_BIO,
+                      RESP_FAILURE, "empty bio line");
+                return;
+            }
+
+            lines++;
+            line_length = 0;
+
+            if (lines > MAX_BIO_LINES) {
+                reply(outbox, session, MSG_WRITE_BIO,
+                      RESP_FAILURE, "too many bio lines");
+                return;
+            }
+        }
+        else {
+            line_length++;
+
+            if (line_length > MAX_BIO_LINE) {
+                reply(outbox, session, MSG_WRITE_BIO,
+                      RESP_FAILURE, "bio line too long");
+                return;
+            }
+        }
+    }
+
+    // Save bio
+    memcpy(accounts[me].bio, bio, length + 1);
+
+    reply(outbox, session, MSG_WRITE_BIO,
+          RESP_SUCCESS, "bio updated");
+}
+
+static void handle_read_bio(int session, const Message *request,
+                            Outbox *outbox)
+{
+    int account = find_account(request->content);
+    char bio[MAX_CONTENT + 1];
+
+    // Check requested account
+    if (account == -1) {
+        reply(outbox, session, MSG_READ_BIO,
+              RESP_FAILURE, "unknown user");
+        return;
+    }
+
+    if (accounts[account].bio[0] == '\0') {
+        reply(outbox, session, MSG_READ_BIO,
+              RESP_SUCCESS, "no bio");
+        return;
+    }
+
+    // Restore line breaks
+    size_t j = 0;
+
+    for (size_t i = 0; accounts[account].bio[i] != '\0'; i++) {
+        if (j >= MAX_CONTENT)
+            break;
+
+        bio[j++] = accounts[account].bio[i] == ';'
+            ? '\n'
+            : accounts[account].bio[i];
+    }
+
+    bio[j] = '\0';
+
+    reply(outbox, session, MSG_READ_BIO,
+          RESP_SUCCESS, bio);
+}
+
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -1481,6 +1569,9 @@ static const MessageRule message_table[] = {
     { MSG_FRIEND_ADD,    ALLOW_LOGGED_IN, handle_friend_add },
     { MSG_FRIEND_REMOVE, ALLOW_LOGGED_IN, handle_friend_remove },
     { MSG_FRIEND_LIST,   ALLOW_LOGGED_IN, handle_friend_list },
+        // Bio
+    { MSG_WRITE_BIO, ALLOW_LOGGED_IN, handle_write_bio },
+    { MSG_READ_BIO,  ALLOW_LOGGED_IN, handle_read_bio },
 };
 
 
