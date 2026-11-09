@@ -23,7 +23,8 @@ Authors: Omar ______ and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau.
 | Bio of up to 10 lines, readable by anyone | Done |
 | Friends list (add, remove, list) | Done, saved to disk |
 | Accounts kept between server restarts | Done (`users.txt`) |
-| Observer mode, private mode, saved games, ELO ranking | Not implemented |
+| ELO ranking | Done |
+| Observer mode, private mode, saved games,| Not implemented |
 
 ---
 
