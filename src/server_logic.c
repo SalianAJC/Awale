@@ -72,6 +72,35 @@ static Message make_message(
     return message;
 }
 
+static int split_first_word(const char *content,
+                            char *word, size_t word_size,
+                            const char **rest)
+{
+    const char *space;
+    size_t length;
+
+    /* Find the first space */
+    space = strchr(content, ' ');
+
+    if (space == NULL)
+        return -1;
+
+    /* Calculate the first word's length */
+    length = (size_t)(space - content);
+
+    /* Reject an empty word or a word that does not fit */
+    if (length == 0 || length >= word_size)
+        return -1;
+
+    /* Copy the first word */
+    memcpy(word, content, length);
+    word[length] = '\0';
+
+    /* Point to everything after the first space */
+    *rest = space + 1;
+
+    return 0;
+}
 
 // Main Game
 static int parse_int(const char *text, int min, int max, int *out)
@@ -945,6 +974,75 @@ static void handle_resign(int session_index, const Message *message,
 
     end_match(outbox, m, winner, "resign", -1);
 }
+
+
+
+static void handle_chat(int session_index, const Message *message,
+                        Outbox *outbox)
+{
+    Session *session = &sessions[session_index];
+    int me = session->account_index;
+
+    char to[MAX_NAME + 1];
+    const char *text;
+    int recipient;
+    char out[MAX_NAME + 1 + MAX_CHAT + 1];
+
+    /* Extract recipient and message text */
+    if (split_first_word(message->content, to, sizeof(to), &text) != 0)
+    {
+        reply(outbox, session_index, MSG_CHAT,
+              RESP_FAILURE, "bad format");
+        return;
+    }
+
+    /* Check that the message is not empty */
+    if (text[0] == '\0')
+    {
+        reply(outbox, session_index, MSG_CHAT,
+              RESP_FAILURE, "empty message");
+        return;
+    }
+
+    /* Check maximum message length */
+    if (strlen(text) > MAX_CHAT)
+    {
+        reply(outbox, session_index, MSG_CHAT,
+              RESP_FAILURE, "message too long");
+        return;
+    }
+
+    /* Find recipient account */
+    recipient = find_account(to);
+
+    if (recipient == -1)
+    {
+        reply(outbox, session_index, MSG_CHAT,
+              RESP_FAILURE, "unknown user");
+        return;
+    }
+
+    /* Check that recipient is online */
+    if (accounts[recipient].session_index == -1)
+    {
+        reply(outbox, session_index, MSG_CHAT,
+              RESP_FAILURE, "user offline");
+        return;
+    }
+
+    /* Build message using the sender's actual username */
+    snprintf(out, sizeof(out), "%s %s",
+             accounts[me].username, text);
+
+    /* Confirm to sender */
+    reply(outbox, session_index, MSG_CHAT,
+          RESP_SUCCESS, to);
+
+    /* Deliver message to recipient */
+    push(outbox, accounts[recipient].session_index,
+         MSG_CHAT, MODE_NONE, out);
+}
+
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -992,7 +1090,7 @@ static const MessageRule message_table[] = {
     { MSG_RESIGN, ALLOW_IN_GAME, handle_resign },
 
     // Chat
-    // { MSG_CHAT,      ALLOW_LOGGED_IN, handle_chat },
+    { MSG_CHAT,      ALLOW_LOGGED_IN, handle_chat },
 };
 
 

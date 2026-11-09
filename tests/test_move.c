@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <string.h>
 
@@ -6,7 +7,7 @@
 static int passed = 0;
 static int failed = 0;
 
-//One logged-in test player
+// One logged-in test player
 typedef struct {
     const char *name;
     int session;
@@ -29,7 +30,7 @@ static void report(int ok, const char *label, const char *details)
     }
 }
 
-//Sends one request from a session and fills the outbox
+// Sends one request from a session and fills the outbox
 static void send_request(int session, const char *type,
                          const char *content, Outbox *outbox)
 {
@@ -44,7 +45,7 @@ static void send_request(int session, const char *type,
     logic_handle_message(session, &request, outbox);
 }
 
-//Connects, registers and logs in a player. Returns 0 on success
+// Connects, registers and logs in a player. Returns 0 on success
 static int login_player(Player *p)
 {
     Outbox outbox;
@@ -65,8 +66,32 @@ static int login_player(Player *p)
 
     return 0;
 }
+static int entry_is(const OutboxEntry *e, const Player *to,
+                    char response, char mode, const char *content);
 
-//Returns the entry sent to this session with this type, or NULL
+// Reconnects an existing account. Returns 0 on success
+static int reconnect_player(Player *p)
+{
+    Outbox outbox;
+
+    p->session = logic_connect(&p->generation);
+
+    if (p->session < 0) {
+        return -1;
+    }
+
+    send_request(p->session, MSG_LOGIN, p->name, &outbox);
+
+    if (outbox.count < 1 ||
+        !entry_is(&outbox.entries[0], p,
+                  RESP_SUCCESS, MODE_NONE, p->name)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+// Returns the entry sent to this session with this type, or NULL
 static const OutboxEntry *find_entry(const Outbox *outbox,
                                      int session, const char *type)
 {
@@ -80,7 +105,7 @@ static const OutboxEntry *find_entry(const Outbox *outbox,
     return NULL;
 }
 
-//Checks recipient, generation, response, mode and content
+// Checks recipient, generation, response, mode and content
 static int entry_is(const OutboxEntry *e, const Player *to,
                     char response, char mode, const char *content)
 {
@@ -116,7 +141,7 @@ static void describe(const Outbox *outbox, char *buffer, size_t size)
     }
 }
 
-//A failed move must return one Mo failure in mode P
+// A failed move must return one Mo failure in mode P
 static void expect_move_failure(const Player *from, const char *content,
                                 const char *reason, const char *label)
 {
@@ -133,7 +158,7 @@ static void expect_move_failure(const Player *from, const char *content,
     report(ok, label, details);
 }
 
-//Starts a game between alice and bob and reads their sides from Gs
+// Starts a game between alice and bob and reads their sides from Gs
 static int start_game(Player *alice, Player *bob)
 {
     Outbox outbox;
@@ -214,7 +239,7 @@ int main(void)
         return 1;
     }
 
-    //Game always starts with side 0
+    // Game always starts with side 0
     Player *first = alice.side == 0 ? &alice : &bob;
     Player *second = alice.side == 1 ? &alice : &bob;
 
@@ -228,11 +253,9 @@ int main(void)
     //------------------------------------------------------------
     printf("\n-- Mo: turn and legality checks\n");
 
-    //Side 1 must not move before side 0
     expect_move_failure(second, "6", "not your turn",
                         "Mo from player whose turn it is not");
 
-    //Side 0 cannot play a hole belonging to side 1
     expect_move_failure(first, "6", "illegal move",
                         "Mo on opponent's side");
 
@@ -255,11 +278,9 @@ int main(void)
     //------------------------------------------------------------
     printf("\n-- Mo: turns alternate\n");
 
-    //Side 0 has just played, so it cannot play again
     expect_move_failure(first, "1", "not your turn",
                         "Mo twice in a row");
 
-    //Side 1 can now play
     send_request(second->session, MSG_MOVE, "6", &outbox);
     describe(&outbox, details, sizeof(details));
 
@@ -276,8 +297,6 @@ int main(void)
     //------------------------------------------------------------
     printf("\n-- Mo: empty hole\n");
 
-    //After playing hole 0, side 0's hole 0 is empty.
-    //Side 0 gets the turn again after side 1 plays.
     send_request(first->session, MSG_MOVE, "0", &outbox);
 
     ok = outbox.count == 1 &&
@@ -288,7 +307,129 @@ int main(void)
     report(ok, "Mo from an empty hole", details);
 
     //------------------------------------------------------------
+    printf("\n-- Rs: resignation\n");
 
+    send_request(first->session, MSG_RESIGN, "", &outbox);
+    describe(&outbox, details, sizeof(details));
+
+    const OutboxEntry *rs =
+        find_entry(&outbox, first->session, MSG_RESIGN);
+
+    const OutboxEntry *go_first =
+        find_entry(&outbox, first->session, MSG_GAME_OVER);
+
+    const OutboxEntry *go_second =
+        find_entry(&outbox, second->session, MSG_GAME_OVER);
+
+    ok = outbox.count == 3 &&
+         entry_is(rs, first, RESP_SUCCESS, MODE_PLAYER, "") &&
+         entry_is(go_first, first, RESP_NONE, MODE_PLAYER, NULL) &&
+         entry_is(go_second, second, RESP_NONE, MODE_PLAYER, NULL) &&
+         strstr(go_first->message.content, " resign") != NULL &&
+         strstr(go_second->message.content, " resign") != NULL;
+
+    report(ok, "Rs: resignation ends the game", details);
+
+    //------------------------------------------------------------
+    printf("\n-- Disconnect: cancel pending challenge\n");
+
+    send_request(alice.session, MSG_CHALLENGE, bob.name, &outbox);
+
+    report(outbox.count == 2, "Alice challenges Bob", "");
+
+    memset(&outbox, 0, sizeof(outbox));
+    logic_disconnect(bob.session, &outbox);
+
+    describe(&outbox, details, sizeof(details));
+
+    const OutboxEntry *refuse =
+        find_entry(&outbox, alice.session, MSG_REFUSE);
+
+    ok = outbox.count == 1 &&
+         entry_is(refuse, &alice, RESP_NONE, MODE_NONE, bob.name);
+
+    report(ok, "Disconnect cancels incoming challenge", details);
+
+    //------------------------------------------------------------
+    printf("\n-- Disconnect: session reuse\n");
+
+    int old_session = bob.session;
+    unsigned int old_generation = bob.generation;
+
+    ok = reconnect_player(&bob) == 0;
+
+    snprintf(details, sizeof(details),
+             "old session %d, new session %d, old generation %u, new generation %u",
+             old_session, bob.session,
+             old_generation, bob.generation);
+
+    ok = ok &&
+         bob.session == old_session &&
+         bob.generation != old_generation;
+
+    report(ok, "Disconnected session can be reused", details);
+
+    if (!ok) {
+        printf("\nCannot continue without Bob reconnecting.\n");
+        printf("\n%d passed, %d failed\n", passed, failed);
+        return 1;
+    }
+
+    //------------------------------------------------------------
+    printf("\n-- Disconnect: player leaves during a game\n");
+
+    ok = start_game(&alice, &bob) == 0;
+
+    report(ok, "New game started", "");
+
+    if (!ok) {
+        printf("\nCannot continue without a new game.\n");
+        printf("\n%d passed, %d failed\n", passed, failed);
+        return 1;
+    }
+
+    Player *leaver = first;
+    Player *remaining = second;
+
+    memset(&outbox, 0, sizeof(outbox));
+    logic_disconnect(leaver->session, &outbox);
+
+    describe(&outbox, details, sizeof(details));
+
+    const OutboxEntry *go_remaining =
+        find_entry(&outbox, remaining->session, MSG_GAME_OVER);
+
+    const OutboxEntry *go_leaver =
+        find_entry(&outbox, leaver->session, MSG_GAME_OVER);
+
+    ok = outbox.count == 1 &&
+         entry_is(go_remaining, remaining,
+                  RESP_NONE, MODE_PLAYER, NULL) &&
+         go_leaver == NULL &&
+         strstr(go_remaining->message.content, " left") != NULL;
+
+    report(ok, "Disconnect ends game: opponent wins", details);
+
+    //------------------------------------------------------------
+    printf("\n-- Disconnect: reuse session after game\n");
+
+    old_session = leaver->session;
+    old_generation = leaver->generation;
+
+    ok = reconnect_player(leaver) == 0;
+
+    snprintf(details, sizeof(details),
+             "old session %d, new session %d, old generation %u, new generation %u",
+             old_session, leaver->session,
+             old_generation, leaver->generation);
+
+    ok = ok &&
+         leaver->session == old_session &&
+         leaver->generation != old_generation;
+
+    report(ok, "Session reusable after game disconnect", details);
+
+    //------------------------------------------------------------
     printf("\n%d passed, %d failed\n", passed, failed);
 
     return failed == 0 ? 0 : 1;
