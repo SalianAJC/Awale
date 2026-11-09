@@ -413,6 +413,8 @@ static int save_friends(void)
 
 //Loads accounts from the local txt file to avoid constant registration
 
+static int has_only_legal_characters(const char *username);
+
 static int load_accounts(void)
 {
     FILE *file = fopen("users.txt", "r");
@@ -1510,6 +1512,8 @@ int logic_init(void)
     // No other threads exist yet, so no lock is needed here.
     account_count = 0;
     next_player_id = 1;
+
+   
 
     if (load_accounts() != 0) {
         DeleteCriticalSection(&logic_lock);
