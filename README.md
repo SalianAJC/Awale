@@ -1,6 +1,6 @@
 # Awalé: networked game server and client
 
-A client/server Awalé (Oware) game in C. Players register with a username, see who is online, challenge each other, play full games with the rules checked by the server, chat, write a bio and manage a friends list.
+A client/server Awalé (Oware) game in C. Players register with a username, see who is online, challenge each other, play full games with the rules checked by the server, chat, write a bio, manage a friends list and climb an ELO ranking.
 
 Authors: Omar ______ and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau.
 
@@ -23,8 +23,8 @@ Authors: Omar ______ and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau.
 | Bio of up to 10 lines, readable by anyone | Done |
 | Friends list (add, remove, list) | Done, saved to disk |
 | Accounts kept between server restarts | Done (`users.txt`) |
-| ELO ranking | Done |
-| Observer mode, private mode, saved games,| Not implemented |
+| ELO ranking, updated after every game, saved to disk | Done |
+| Observer mode, private mode, saved games | Not implemented (designed, see `PROTOCOL.md` section 9) |
 
 ---
 
@@ -53,8 +53,10 @@ The Makefile detects the system and chooses the compiler and the run command aut
 | `make run-server` | Builds and starts the server |
 | `make run-client` | Builds and starts a client |
 | `make test` | Runs the protocol test (send and receive over a real socket) |
-| `make test-logic` | Runs the server logic tests (registration, challenges, moves, chat) |
-| `make clean` | Deletes `target/` |
+| `make test-logic` | Runs the server logic tests (registration, challenges, moves, chat, ELO) |
+| `make test-e2e` | Runs the end-to-end game scenarios (full games, resignations, disconnections, two games at once) |
+| `make test-all` | Runs all the tests above |
+| `make clean` | Deletes the compiled files in `target/` |
 
 ---
 
@@ -79,7 +81,7 @@ On Linux, if typing in the client misbehaves under Wine, start it in a Windows c
 3. Exit
 ```
 
-There is no password: a username is enough to log in, but the same account cannot be logged in twice at the same time. After logging in, the client shows the list of online players.
+There is no password: a username is enough to log in, but the same account cannot be logged in twice at the same time. If the login fails (unknown user, already connected), the client goes back to this menu. After logging in, the client shows the list of online players.
 
 ### Lobby menu
 
@@ -92,10 +94,15 @@ There is no password: a username is enough to log in, but the same account canno
 6. Remove a friend
 7. Show friends
 8. Chat with a player      type the username, then the message
-9. Quit
+9. Show player ranking     every player with their ELO rating, best first
+10. Quit
 ```
 
 **Receiving a challenge:** while you are in the lobby, a challenge appears as soon as it is sent: `You have been challenged by alice! Accept? (y/n)`. Answering `y` starts the game for both players. When a game starts, every other pending challenge involving either player is cancelled.
+
+**Your challenge is refused:** the client shows `Your challenge to bob was refused or cancelled.` This also happens when the player you challenged starts a game with someone else.
+
+**Ranking:** every player starts at 1200. After each game, the winner gains points and the loser loses the same amount (ELO, K = 32): beating a stronger player gives more. Resigning or disconnecting counts as a loss.
 
 **Receiving a chat message:** it appears immediately as `[CHAT] alice hello`, in the lobby and during a game.
 
@@ -130,10 +137,16 @@ The server needs no input: start it and leave it running. It writes two files in
 
 | File | Contents |
 |---|---|
-| `users.txt` | one line per account: `id\|username\|rating` |
+| `users.txt` | one line per account: `id\|username\|rating`, rewritten after every game |
 | `friends.txt` | one line per account: `username\|friend1\|friend2...` |
 
-Both are loaded when the server starts, so accounts and friends survive a restart. **To start from a clean state, stop the server and delete both files.** Bios are kept in memory only and are lost on restart.
+Both are loaded when the server starts, so accounts, ratings and friends survive a restart. Bios are kept in memory only and are lost on restart.
+
+**To start from a clean state**, stop the server, then delete both files from the folder it was started from:
+
+```
+rm -f users.txt friends.txt
+```
 
 Limits: 50 connected clients, 50 accounts, 25 games at the same time, 20 friends per player.
 
@@ -183,7 +196,9 @@ Clients only ever name players by username. The server is the only one to decide
 
 ## 7. Tests
 
-`make test-logic` runs four test programs that call the server logic directly, with no network, and check every reply and push:
+The tests call the server logic directly, without any network, and check every reply and every push. Each test program uses its own data files in `target/`, so the tests never touch the server's `users.txt`, and can be run any number of times.
+
+`make test-logic`: one program per feature.
 
 | Test | Checks |
 |---|---|
@@ -191,8 +206,19 @@ Clients only ever name players by username. The server is the only one to decide
 | `test_challenge` | challenge, refuse, accept, cancelled challenges, sides, two games at once, disconnection |
 | `test_move` | bad format, wrong turn, wrong side, empty hole, alternating turns, board updates |
 | `test_chat` | delivery to the right player, spaces and `\|` kept in the text, length limit, messaging yourself |
+| `test_elo` | rating changes after a win, a loss and a disconnection, ranking order, ratings kept after a restart |
 
-The tests use their own data files in `target/`, so they never touch the server's `users.txt`.
+`make test-e2e`: whole scenarios in `tests/test-end-to-end/`. Each simulated client keeps its own copy of the board and applies a move only when the server's board update arrives, exactly like the real client.
+
+| Test | Scenario |
+|---|---|
+| `test_full_game` | a full game played to the end by the rules: every move, both boards identical after each move, scores, winner, ratings, rematch |
+| `test_refused_moves` | moves out of turn, on the wrong side, from an empty hole, badly formatted; messages refused during a game; none of them changes the board |
+| `test_resign` | resigning before any move and in the middle of a game, by either player |
+| `test_two_games` | two games at the same time: moves never reach the other game, chat across games, a third game starting |
+| `test_disconnect` | leaving mid-game, logging in again, leaving with challenges pending, leaving before logging in |
+| `test_cancellations` | pending challenges cancelled when a game starts |
+| `test_random_sides` | who starts is chosen at random, and side 0 always moves first |
 
 ---
 
@@ -200,5 +226,6 @@ The tests use their own data files in `target/`, so they never touch the server'
 
 - The client connects to `127.0.0.1` only: all players must be on the same machine as the server.
 - Bios are not saved to disk.
-- The online list is shown in its raw form (`alice:L,bob:G`).
-- Observer mode, private games, game history and ratings are not implemented.
+- The online list and the ranking are shown in their raw form (`alice:L,bob:G`, `bob:1216,alice:1184`). The ranking stops at about 25 players with long names, because one message holds at most 1024 characters.
+- A game in progress cannot be resumed after a disconnection: the player who left loses.
+- Observer mode, private games and game history are not implemented. Their messages are specified in `PROTOCOL.md` (section 9), and the server already keeps the move list and an observer list for each game.

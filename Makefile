@@ -107,10 +107,54 @@ test-logic: $(TEST_LOGIC_BINS)
 	echo "All logic tests passed."
 
 # ==========================================
+# END-TO-END TESTS
+# ==========================================
+#
+# Whole scenarios (full games, resignations, disconnections, several games
+# at once) with simulated clients. Every test_*.c in the folder is one program,
+# linked with the shared helpers e2e.c and the server logic.
+
+E2E_DIR = tests/test-end-to-end
+E2E_COMMON = $(E2E_DIR)/e2e.c
+
+# Automatically discover all test_*.c files.
+E2E_FILES = $(wildcard $(E2E_DIR)/test_*.c)
+
+# One executable per test, prefixed with e2e_ to keep them apart from the logic tests.
+E2E_BINS = $(patsubst $(E2E_DIR)/test_%.c,$(TARGET_DIR)/e2e_%.exe,$(E2E_FILES))
+
+# Each test gets its own persistence files, so it never touches the server's data.
+$(TARGET_DIR)/e2e_%.exe: $(E2E_DIR)/test_%.c $(E2E_COMMON) $(E2E_DIR)/e2e.h $(TEST_LOGIC_SRC) | $(TARGET_DIR)
+	$(CC) $(CFLAGS) -I$(E2E_DIR) \
+		-DUSERS_FILE=\"$(TARGET_DIR)/e2e_$*_users.txt\" \
+		-DFRIENDS_FILE=\"$(TARGET_DIR)/e2e_$*_friends.txt\" \
+		$(E2E_DIR)/test_$*.c $(E2E_COMMON) $(TEST_LOGIC_SRC) -o $@ $(LDLIBS)
+
+# Compile and run every end-to-end test.
+test-e2e: $(E2E_BINS)
+	@set -e; \
+	if [ -z "$(E2E_BINS)" ]; then \
+		echo "No end-to-end tests found in $(E2E_DIR)/"; \
+		exit 1; \
+	fi; \
+	for test in $(E2E_BINS); do \
+		echo ""; \
+		echo "========================================"; \
+		echo "Running $$test"; \
+		echo "========================================"; \
+		$(RUN) $(PATH_PREFIX)$$test; \
+	done; \
+	echo ""; \
+	echo "All end-to-end tests passed."
+
+# Every test: protocol, server logic, end to end.
+test-all: test test-logic test-e2e
+
+# ==========================================
 # CLEAN
 # ==========================================
 
 clean:
 	$(RM)
 
-.PHONY: all run run-server run-client test test-logic clean
+.PHONY: all run run-server run-client test test-logic test-e2e test-all clean
