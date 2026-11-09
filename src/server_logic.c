@@ -667,7 +667,9 @@ static void end_match(Outbox *outbox, int m,
         score_a = 0.0;       /* Player B wins */
 
     update_ratings(a, b, score_a);
-
+    if (winner_account != -1) {
+        winner = accounts[winner_account].username;
+    }
     snprintf(content, sizeof(content), "%d %d %d %s %s",
              matches[m].game_id,
              matches[m].game.captures[0],
