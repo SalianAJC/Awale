@@ -17,11 +17,12 @@
 #include <errno.h>
 #include <limits.h>
 #include <windows.h>
+#include <math.h>
 
 #include "match.h"
 #include "server_logic.h"
 
-
+static int save_all_accounts(void);
 // ================================================================
 // 1. PRIVATE STATE
 // ================================================================
@@ -37,12 +38,53 @@ static int next_game_id = 1;
 
 static CRITICAL_SECTION logic_lock;
 
-
 // ================================================================
 // 2. HELPERS
 // ================================================================
 
 // ---------- Messages ----------
+
+static int update_ratings(int a, int b, double score_a)
+{
+    if (a < 0 || a >= account_count ||
+        b < 0 || b >= account_count ||
+        a == b)
+    {
+        return -1;
+    }
+
+    int old_a = accounts[a].rating;
+    int old_b = accounts[b].rating;
+
+    double expected_a =
+        1.0 / (1.0 + pow(10.0, ((double)old_b - old_a) / 400.0));
+
+    double expected_b = 1.0 - expected_a;
+    double score_b = 1.0 - score_a;
+
+    int new_a = (int)lround(
+        old_a + ELO_K * (score_a - expected_a)
+    );
+
+    int new_b = (int)lround(
+        old_b + ELO_K * (score_b - expected_b)
+    );
+
+    accounts[a].rating = new_a;
+    accounts[b].rating = new_b;
+
+    if (save_all_accounts() != 0)
+    {
+        /* Restore the old ratings if saving failed. */
+        accounts[a].rating = old_a;
+        accounts[b].rating = old_b;
+
+        printf("Error: could not save updated ELO ratings.\n");
+        return -1;
+    }
+
+    return 0;
+}
 
 // Builds a message. Content may be NULL.
 // Content is truncated if it exceeds the message buffer.
@@ -50,8 +92,7 @@ static Message make_message(
     const char *type,
     char response,
     char mode,
-    const char *content
-)
+    const char *content)
 {
     Message message = {0};
 
@@ -61,13 +102,13 @@ static Message make_message(
     message.mode = mode;
     message.receiver = 0;
 
-    if (content != NULL) {
+    if (content != NULL)
+    {
         snprintf(
             message.content,
             sizeof(message.content),
             "%s",
-            content
-        );
+            content);
     }
 
     return message;
@@ -154,18 +195,18 @@ static int find_match_by_game_id(int id)
 static void outbox_add(
     Outbox *outbox,
     int recipient,
-    const Message *message
-)
+    const Message *message)
 {
-    if (recipient < 0 || recipient >= MAX_CLIENTS) {
+    if (recipient < 0 || recipient >= MAX_CLIENTS)
+    {
         printf(
             "Error: outbox_add with invalid session %d. Message dropped.\n",
-            recipient
-        );
+            recipient);
         return;
     }
 
-    if (outbox->count >= MAX_OUTBOX_ENTRIES) {
+    if (outbox->count >= MAX_OUTBOX_ENTRIES)
+    {
         printf("Error: outbox is full. Message dropped.\n");
         return;
     }
@@ -179,7 +220,6 @@ static void outbox_add(
     outbox->count++;
 }
 
-
 // Builds a message and adds it to the recipient's outbox.
 static void send_to(
     Outbox *outbox,
@@ -187,10 +227,10 @@ static void send_to(
     const char *type,
     char mode,
     char response,
-    const char *content
-)
+    const char *content)
 {
-    if (session < 0 || session >= MAX_CLIENTS) {
+    if (session < 0 || session >= MAX_CLIENTS)
+    {
         return;
     }
 
@@ -198,12 +238,10 @@ static void send_to(
         type,
         response,
         mode,
-        content
-    );
+        content);
 
     outbox_add(outbox, session, &message);
 }
-
 
 // Sends a push message.
 static void push(
@@ -211,8 +249,7 @@ static void push(
     int session,
     const char *type,
     char mode,
-    const char *content
-)
+    const char *content)
 {
     send_to(
         outbox,
@@ -220,10 +257,8 @@ static void push(
         type,
         mode,
         RESP_NONE,
-        content
-    );
+        content);
 }
-
 
 // Sends a reply. Replies use MODE_NONE.
 static void reply(
@@ -231,8 +266,7 @@ static void reply(
     int session,
     const char *type,
     char response,
-    const char *content
-)
+    const char *content)
 {
     send_to(
         outbox,
@@ -240,29 +274,33 @@ static void reply(
         type,
         MODE_NONE,
         response,
-        content
-    );
+        content);
 }
 
-static int find_free_match(){
+static int find_free_match()
+{
     int m = -1; // assume server is full
     for (int i = 0; i < MAX_GAMES; i++)
     {
         int status = matches[i].in_use;
-        if (status == 0){ // found a free match
+        if (status == 0)
+        { // found a free match
             return i;
         }
     }
     return m;
-
 }
 
-static void cancel_challenges_to(int account, Outbox *outbox){
-    for (int i = 0; i < MAX_CLIENTS; i++){
-        if (sessions[i].in_use == 0){
+static void cancel_challenges_to(int account, Outbox *outbox)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (sessions[i].in_use == 0)
+        {
             continue;
         }
-        if (sessions[i].challenge_target == account){
+        if (sessions[i].challenge_target == account)
+        {
             sessions[i].challenge_target = -1;
             push(outbox, i, MSG_REFUSE, MODE_NONE, accounts[account].username);
         }
@@ -274,8 +312,10 @@ static void cancel_challenges_to(int account, Outbox *outbox){
 // Returns the account index, or -1 if the username doesn't exist.
 static int find_account(const char *username)
 {
-    for (int i = 0; i < account_count; i++) {
-        if (strcmp(accounts[i].username, username) == 0) {
+    for (int i = 0; i < account_count; i++)
+    {
+        if (strcmp(accounts[i].username, username) == 0)
+        {
             return i;
         }
     }
@@ -283,11 +323,12 @@ static int find_account(const char *username)
     return -1;
 }
 
-//Finds an account by player id within the txt
+// Finds an account by player id within the txt
 
 static int find_account_by_id(int player_id)
 {
-    for (int i = 0; i < account_count; i++) {
+    for (int i = 0; i < account_count; i++)
+    {
         if (accounts[i].player_id == player_id)
             return i;
     }
@@ -297,7 +338,8 @@ static int find_account_by_id(int player_id)
 
 static int find_friend_slot(const Account *account, int friend_id)
 {
-    for (int i = 0; i < MAX_FRIENDS; i++) {
+    for (int i = 0; i < MAX_FRIENDS; i++)
+    {
         if (account->friends_ids[i] == friend_id)
             return i;
     }
@@ -307,7 +349,8 @@ static int find_friend_slot(const Account *account, int friend_id)
 
 static int find_free_friend_slot(const Account *account)
 {
-    for (int i = 0; i < MAX_FRIENDS; i++) {
+    for (int i = 0; i < MAX_FRIENDS; i++)
+    {
         if (account->friends_ids[i] == 0)
             return i;
     }
@@ -315,13 +358,14 @@ static int find_free_friend_slot(const Account *account)
     return -1;
 }
 
-//Loads the friends list
+// Loads the friends list
 
 static int load_friends(void)
 {
     FILE *file = fopen(FRIENDS_FILE, "r");
 
-    if (file == NULL) {
+    if (file == NULL)
+    {
         if (errno == ENOENT)
             return 0;
 
@@ -330,7 +374,8 @@ static int load_friends(void)
 
     char line[1024];
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
         char *username = strtok(line, "|\r\n");
 
         if (username == NULL)
@@ -343,7 +388,8 @@ static int load_friends(void)
 
         char *friend_name;
 
-        while ((friend_name = strtok(NULL, "|\r\n")) != NULL) {
+        while ((friend_name = strtok(NULL, "|\r\n")) != NULL)
+        {
             int friend_index = find_account(friend_name);
 
             if (friend_index == -1 || friend_index == account_index)
@@ -353,8 +399,10 @@ static int load_friends(void)
             int friend_id = accounts[friend_index].player_id;
             int exists = 0;
 
-            for (int i = 0; i < MAX_FRIENDS; i++) {
-                if (account->friends_ids[i] == friend_id) {
+            for (int i = 0; i < MAX_FRIENDS; i++)
+            {
+                if (account->friends_ids[i] == friend_id)
+                {
                     exists = 1;
                     break;
                 }
@@ -363,8 +411,10 @@ static int load_friends(void)
             if (exists)
                 continue;
 
-            for (int i = 0; i < MAX_FRIENDS; i++) {
-                if (account->friends_ids[i] == 0) {
+            for (int i = 0; i < MAX_FRIENDS; i++)
+            {
+                if (account->friends_ids[i] == 0)
+                {
                     account->friends_ids[i] = friend_id;
                     break;
                 }
@@ -377,7 +427,7 @@ static int load_friends(void)
     return 0;
 }
 
-//Save friends
+// Save friends
 
 static int save_friends(void)
 {
@@ -386,10 +436,12 @@ static int save_friends(void)
     if (file == NULL)
         return -1;
 
-    for (int i = 0; i < account_count; i++) {
+    for (int i = 0; i < account_count; i++)
+    {
         fprintf(file, "%s", accounts[i].username);
 
-        for (int j = 0; j < MAX_FRIENDS; j++) {
+        for (int j = 0; j < MAX_FRIENDS; j++)
+        {
             int friend_id = accounts[i].friends_ids[j];
 
             if (friend_id == 0)
@@ -397,7 +449,8 @@ static int save_friends(void)
 
             int friend_index = find_account_by_id(friend_id);
 
-            if (friend_index != -1) {
+            if (friend_index != -1)
+            {
                 fprintf(file, "|%s", accounts[friend_index].username);
             }
         }
@@ -411,7 +464,7 @@ static int save_friends(void)
     return 0;
 }
 
-//Loads accounts from the local txt file to avoid constant registration
+// Loads accounts from the local txt file to avoid constant registration
 
 static int has_only_legal_characters(const char *username);
 
@@ -419,7 +472,8 @@ static int load_accounts(void)
 {
     FILE *file = fopen(USERS_FILE, "r");
 
-    if (file == NULL) {
+    if (file == NULL)
+    {
         if (errno == ENOENT)
             return 0;
 
@@ -429,7 +483,8 @@ static int load_accounts(void)
     char line[128];
     int max_id = 0;
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
         int id;
         int rating;
         char username[MAX_NAME + 1];
@@ -475,7 +530,7 @@ static int load_accounts(void)
     return 0;
 }
 
-//Saves an account to the txt databank
+// Saves an account to the txt databank
 
 static int save_account(const Account *account)
 {
@@ -489,10 +544,10 @@ static int save_account(const Account *account)
         "%d|%s|%d\n",
         account->player_id,
         account->username,
-        account->rating
-    );
+        account->rating);
 
-    if (result < 0) {
+    if (result < 0)
+    {
         fclose(file);
         return -1;
     }
@@ -503,26 +558,66 @@ static int save_account(const Account *account)
     return 0;
 }
 
+static int save_all_accounts(void)
+{
+    char temp_path[sizeof(USERS_FILE) + 5];
+
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", USERS_FILE);
+
+    FILE *file = fopen(temp_path, "w");
+
+    if (file == NULL)
+        return -1;
+
+    for (int i = 0; i < account_count; i++)
+    {
+        if (fprintf(file, "%d|%s|%d\n",
+                    accounts[i].player_id,
+                    accounts[i].username,
+                    accounts[i].rating) < 0)
+        {
+            fclose(file);
+            remove(temp_path);
+            return -1;
+        }
+    }
+
+    if (fclose(file) != 0)
+    {
+        remove(temp_path);
+        return -1;
+    }
+
+    if (!MoveFileExA(temp_path, USERS_FILE,
+                     MOVEFILE_REPLACE_EXISTING |
+                     MOVEFILE_WRITE_THROUGH))
+    {
+        remove(temp_path);
+        return -1;
+    }
+
+    return 0;
+}
 
 // Returns 1 if the username contains only letters, digits and '_'.
 static int has_only_legal_characters(const char *username)
 {
-    for (int i = 0; username[i] != '\0'; i++) {
+    for (int i = 0; username[i] != '\0'; i++)
+    {
         char c = username[i];
 
         if (!(
-            (c >= 'a' && c <= 'z') ||
-            (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') ||
-            c == '_'
-        )) {
+                (c >= 'a' && c <= 'z') ||
+                (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') ||
+                c == '_'))
+        {
             return 0;
         }
     }
 
     return 1;
 }
-
 
 // Defined with the online-list handler, also used by login.
 static void build_online_list(char *buffer, size_t size);
@@ -531,7 +626,7 @@ static void notify_match(Outbox *outbox, int m,
                          const char *type, const char *content,
                          int skip_session)
 {
-    for (int i = 0; i < 2; i++) 
+    for (int i = 0; i < 2; i++)
     {
         int account = matches[m].side_account[i];
         int session = accounts[account].session_index;
@@ -559,8 +654,19 @@ static void end_match(Outbox *outbox, int m,
     char content[MAX_CONTENT];
     const char *winner = "draw";
 
-    if (winner_account != -1)
-        winner = accounts[winner_account].username;
+    int a = matches[m].side_account[0];
+    int b = matches[m].side_account[1];
+
+    double score_a;
+
+    if (winner_account == -1)
+        score_a = 0.5;       /* Draw */
+    else if (winner_account == a)
+        score_a = 1.0;       /* Player A wins */
+    else
+        score_a = 0.0;       /* Player B wins */
+
+    update_ratings(a, b, score_a);
 
     snprintf(content, sizeof(content), "%d %d %d %s %s",
              matches[m].game_id,
@@ -613,82 +719,78 @@ static void end_match(Outbox *outbox, int m,
 typedef void (*Handler)(
     int session,
     const Message *request,
-    Outbox *outbox
-);
-
+    Outbox *outbox);
 
 // ---------- R : register ----------
 
 static void handle_register(
     int session,
     const Message *request,
-    Outbox *outbox
-)
+    Outbox *outbox)
 {
     const char *username = request->content;
     size_t length = strlen(username);
 
-    if (length == 0) {
+    if (length == 0)
+    {
         reply(
             outbox,
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            "Username can't be empty"
-        );
+            "Username can't be empty");
         return;
     }
 
-    if (length > MAX_NAME) {
+    if (length > MAX_NAME)
+    {
         char reason[64];
 
         snprintf(
             reason,
             sizeof(reason),
             "Username can't exceed %d characters",
-            MAX_NAME
-        );
+            MAX_NAME);
 
         reply(
             outbox,
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            reason
-        );
+            reason);
         return;
     }
 
-    if (!has_only_legal_characters(username)) {
+    if (!has_only_legal_characters(username))
+    {
         reply(
             outbox,
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            "Username contains illegal characters"
-        );
+            "Username contains illegal characters");
         return;
     }
 
-    if (find_account(username) != -1) {
+    if (find_account(username) != -1)
+    {
         reply(
             outbox,
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            "Username already exists"
-        );
+            "Username already exists");
         return;
     }
 
-    if (account_count >= MAX_CLIENTS) {
+    if (account_count >= MAX_CLIENTS)
+    {
         reply(
             outbox,
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            "Server is full"
-        );
+            "Server is full");
         return;
     }
 
@@ -703,7 +805,8 @@ static void handle_register(
 
     memcpy(account->username, username, length + 1);
 
-    if (save_account(account) != 0) {
+    if (save_account(account) != 0)
+    {
         memset(account, 0, sizeof(*account));
 
         reply(
@@ -711,8 +814,7 @@ static void handle_register(
             session,
             MSG_REGISTER,
             RESP_FAILURE,
-            "could not save account"
-        );
+            "could not save account");
         return;
     }
 
@@ -724,85 +826,81 @@ static void handle_register(
         session,
         MSG_REGISTER,
         RESP_SUCCESS,
-        "registered"
-    );
+        "registered");
 }
-
 
 // ---------- L : login ----------
 
 static void handle_login(
     int session,
     const Message *request,
-    Outbox *outbox
-)
+    Outbox *outbox)
 {
     const char *username = request->content;
     size_t length = strlen(username);
 
-    if (length == 0) {
+    if (length == 0)
+    {
         reply(
             outbox,
             session,
             MSG_LOGIN,
             RESP_FAILURE,
-            "Username can't be empty"
-        );
+            "Username can't be empty");
         return;
     }
 
-    if (length > MAX_NAME) {
+    if (length > MAX_NAME)
+    {
         char reason[64];
 
         snprintf(
             reason,
             sizeof(reason),
             "Username can't exceed %d characters",
-            MAX_NAME
-        );
+            MAX_NAME);
 
         reply(
             outbox,
             session,
             MSG_LOGIN,
             RESP_FAILURE,
-            reason
-        );
+            reason);
         return;
     }
 
-    if (!has_only_legal_characters(username)) {
+    if (!has_only_legal_characters(username))
+    {
         reply(
             outbox,
             session,
             MSG_LOGIN,
             RESP_FAILURE,
-            "Username contains illegal characters"
-        );
+            "Username contains illegal characters");
         return;
     }
 
     int account_index = find_account(username);
 
-    if (account_index == -1) {
+    if (account_index == -1)
+    {
         reply(
             outbox,
             session,
             MSG_LOGIN,
             RESP_FAILURE,
-            "unknown user"
-        );
+            "unknown user");
         return;
     }
 
-    if (accounts[account_index].session_index != -1) {
+    if (accounts[account_index].session_index != -1)
+    {
         reply(
             outbox,
             session,
             MSG_LOGIN,
             RESP_FAILURE,
-            "already connected"
-        );
+            "already connected");
         return;
     }
 
@@ -816,8 +914,7 @@ static void handle_login(
         session,
         MSG_LOGIN,
         RESP_SUCCESS,
-        username
-    );
+        username);
 
     // Push the current online list to the newly logged-in player.
     char list[MAX_CONTENT + 1];
@@ -829,10 +926,8 @@ static void handle_login(
         session,
         MSG_PLAYERS_ONLINE,
         MODE_NONE,
-        list
-    );
+        list);
 }
-
 
 // ---------- LO : list online players ----------
 
@@ -842,23 +937,23 @@ static void handle_login(
 // O = observing
 static char state_letter(SessionState state)
 {
-    switch (state) {
-        case STATE_LOBBY:
-            return 'L';
+    switch (state)
+    {
+    case STATE_LOBBY:
+        return 'L';
 
-        case STATE_IN_GAME:
-            return 'G';
+    case STATE_IN_GAME:
+        return 'G';
 
-        case STATE_OBSERVING:
-            return 'O';
+    case STATE_OBSERVING:
+        return 'O';
 
-        case STATE_CONNECTED:
-            return 'C';
+    case STATE_CONNECTED:
+        return 'C';
     }
 
     return '?';
 }
-
 
 // Builds a list such as:
 // alice:L,bob:G,carol:O
@@ -867,23 +962,26 @@ static char state_letter(SessionState state)
 // An entry is never partially written.
 static void build_online_list(char *buffer, size_t size)
 {
-    if (buffer == NULL || size == 0) {
+    if (buffer == NULL || size == 0)
+    {
         return;
     }
 
     buffer[0] = '\0';
 
-    for (int i = 0; i < MAX_CLIENTS; i++) {
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
         const Session *session = &sessions[i];
 
-        if (!session->in_use || session->account_index == -1) {
+        if (!session->in_use || session->account_index == -1)
+        {
             continue;
         }
 
         if (
             session->account_index < 0 ||
-            session->account_index >= account_count
-        ) {
+            session->account_index >= account_count)
+        {
             continue;
         }
 
@@ -897,14 +995,14 @@ static void build_online_list(char *buffer, size_t size)
             "%s%s:%c",
             buffer[0] != '\0' ? "," : "",
             user->username,
-            state_letter(session->state)
-        );
+            state_letter(session->state));
 
         size_t current_length = strlen(buffer);
         size_t entry_length = strlen(entry);
 
         // Leave room for the terminating '\0'.
-        if (entry_length >= size - current_length) {
+        if (entry_length >= size - current_length)
+        {
             break;
         }
 
@@ -912,12 +1010,10 @@ static void build_online_list(char *buffer, size_t size)
     }
 }
 
-
 static void handle_list_online(
     int session,
     const Message *request,
-    Outbox *outbox
-)
+    Outbox *outbox)
 {
     (void)request;
 
@@ -930,93 +1026,97 @@ static void handle_list_online(
         session,
         MSG_LIST_ONLINE,
         RESP_SUCCESS,
-        list
-    );
+        list);
 }
 
+// C : Challenge
+static void handle_challenge(int session, const Message *request, Outbox *outbox)
+{
 
-// C : Challenge 
-static void handle_challenge(int session, const Message *request, Outbox *outbox){
-    
     int me = sessions[session].account_index;
     int b = find_account(request->content);
 
-
     char content[MAX_CONTENT];
 
-    if (sessions[session].challenge_target != -1){ // sender already has an outgoing challenge
+    if (sessions[session].challenge_target != -1)
+    { // sender already has an outgoing challenge
         // construct content
-        snprintf(content,sizeof(content),"%s","challenge already pending");
+        snprintf(content, sizeof(content), "%s", "challenge already pending");
 
         // reply to offline player
         reply(outbox, session, MSG_CHALLENGE, RESP_FAILURE, content);
 
-
-        //quit the function
-        return; 
+        // quit the function
+        return;
     }
 
-    if (b == -1){ // challenge sent to offline player
+    if (b == -1)
+    { // challenge sent to offline player
         // construct content
-        snprintf(content,sizeof(content),"%s","unknown user");
+        snprintf(content, sizeof(content), "%s", "unknown user");
         reply(outbox, session, MSG_CHALLENGE, RESP_FAILURE, content);
 
         // reply
-        return; 
+        return;
     }
 
-    if (b == me){ // user tried to challenge themselves
+    if (b == me)
+    { // user tried to challenge themselves
         // construct content
-        snprintf(content,sizeof(content),"%s","cannot challenge yourself");
+        snprintf(content, sizeof(content), "%s", "cannot challenge yourself");
         reply(outbox, session, MSG_CHALLENGE, RESP_FAILURE, content);
 
         // reply
-        return; 
+        return;
     }
 
     int bs = accounts[b].session_index;
-    if (bs == -1){ // user tried to challenge an offline user
+    if (bs == -1)
+    { // user tried to challenge an offline user
         // construct content
-        snprintf(content,sizeof(content),"%s","user offline");
+        snprintf(content, sizeof(content), "%s", "user offline");
         reply(outbox, session, MSG_CHALLENGE, RESP_FAILURE, content);
 
         // reply
-        return; 
+        return;
     }
 
-    if (sessions[bs].state != STATE_LOBBY){ // user tried to challenge a busy user
+    if (sessions[bs].state != STATE_LOBBY)
+    { // user tried to challenge a busy user
         // construct content
-        snprintf(content,sizeof(content),"%s","user busy");
+        snprintf(content, sizeof(content), "%s", "user busy");
         reply(outbox, session, MSG_CHALLENGE, RESP_FAILURE, content);
 
         // reply
-        return; 
+        return;
     }
 
     // In case of success
-    
-    //Set the session challenge to b
+
+    // Set the session challenge to b
     sessions[session].challenge_target = b;
     reply(outbox, session, MSG_CHALLENGE, RESP_SUCCESS, accounts[b].username);
     push(outbox, bs, MSG_CHALLENGED, MODE_NONE, accounts[me].username);
-
 }
 
-static void handle_refuse(int session, const Message *request, Outbox *outbox) {
+static void handle_refuse(int session, const Message *request, Outbox *outbox)
+{
 
     // Here, sender is b, receiver is a
 
     int b = sessions[session].account_index;
     int a = find_account(request->content);
 
-    if (a == -1) {
+    if (a == -1)
+    {
         reply(outbox, session, MSG_REFUSE, RESP_FAILURE, "no challenge from this user");
         return;
     }
 
     int as = accounts[a].session_index;
 
-    if (as == -1 || sessions[as].challenge_target != b) {
+    if (as == -1 || sessions[as].challenge_target != b)
+    {
         reply(outbox, session, MSG_REFUSE, RESP_FAILURE, "no challenge from this user");
         return;
     }
@@ -1031,31 +1131,36 @@ static void handle_refuse(int session, const Message *request, Outbox *outbox) {
     push(outbox, as, MSG_REFUSE, MODE_NONE, accounts[b].username);
 }
 
-static void handle_accept(int session, const Message *request, Outbox *outbox){
+static void handle_accept(int session, const Message *request, Outbox *outbox)
+{
 
     // Same here. Sender is b, Receiver is a
     int b = sessions[session].account_index;
     int a = find_account(request->content);
 
-    if (a == -1) {
+    if (a == -1)
+    {
         reply(outbox, session, MSG_ACCEPT, RESP_FAILURE, "no challenge from this user");
         return;
     }
 
     int as = accounts[a].session_index;
 
-    if (as == -1 || sessions[as].challenge_target != b) {
+    if (as == -1 || sessions[as].challenge_target != b)
+    {
         reply(outbox, session, MSG_ACCEPT, RESP_FAILURE, "no challenge from this user");
         return;
     }
 
-    if (sessions[as].state != STATE_LOBBY){
+    if (sessions[as].state != STATE_LOBBY)
+    {
         reply(outbox, session, MSG_ACCEPT, RESP_FAILURE, "user busy");
         return;
     }
 
     int m = find_free_match();
-    if (m == -1 ){
+    if (m == -1)
+    {
         reply(outbox, session, MSG_ACCEPT, RESP_FAILURE, "server full");
         return;
     }
@@ -1071,10 +1176,13 @@ static void handle_accept(int session, const Message *request, Outbox *outbox){
     int side_a;
     int side_b;
 
-    if (rand() % 2 == 0){
+    if (rand() % 2 == 0)
+    {
         side_a = 0;
         side_b = 1;
-    } else {
+    }
+    else
+    {
         side_a = 1;
         side_b = 0;
     }
@@ -1103,10 +1211,10 @@ static void handle_accept(int session, const Message *request, Outbox *outbox){
     char content_b[MAX_CONTENT];
 
     snprintf(content_a, sizeof(content_a), "%d %d %s",
-        matches[m].game_id, side_a, accounts[b].username);
+             matches[m].game_id, side_a, accounts[b].username);
 
     snprintf(content_b, sizeof(content_b), "%d %d %s",
-        matches[m].game_id, side_b, accounts[a].username);
+             matches[m].game_id, side_b, accounts[a].username);
 
     push(outbox, as, MSG_GAME_START, MODE_PLAYER, content_a);
     push(outbox, session, MSG_GAME_START, MODE_PLAYER, content_b);
@@ -1126,7 +1234,7 @@ static void handle_move(int session_index, const Message *message,
     if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
     {
         send_to(outbox, session_index, MSG_MOVE,
-              MODE_PLAYER, RESP_FAILURE, "illegal move");
+                MODE_PLAYER, RESP_FAILURE, "illegal move");
         return;
     }
 
@@ -1137,7 +1245,7 @@ static void handle_move(int session_index, const Message *message,
     if (parse_int(message->content, 0, 11, &hole) != 0)
     {
         send_to(outbox, session_index, MSG_MOVE,
-              MODE_PLAYER, RESP_FAILURE, "bad format");
+                MODE_PLAYER, RESP_FAILURE, "bad format");
         return;
     }
 
@@ -1145,7 +1253,7 @@ static void handle_move(int session_index, const Message *message,
     if (g->current_player != side)
     {
         send_to(outbox, session_index, MSG_MOVE,
-              MODE_PLAYER, RESP_FAILURE, "not your turn");
+                MODE_PLAYER, RESP_FAILURE, "not your turn");
         return;
     }
 
@@ -1153,7 +1261,7 @@ static void handle_move(int session_index, const Message *message,
     if (matches[m].move_count >= MAX_MOVES || sow(g, hole) != 0)
     {
         send_to(outbox, session_index, MSG_MOVE,
-              MODE_PLAYER, RESP_FAILURE, "illegal move");
+                MODE_PLAYER, RESP_FAILURE, "illegal move");
         return;
     }
 
@@ -1209,8 +1317,6 @@ static void handle_resign(int session_index, const Message *message,
 
     end_match(outbox, m, winner, "resign", -1);
 }
-
-
 
 static void handle_chat(int session_index, const Message *message,
                         Outbox *outbox)
@@ -1284,25 +1390,28 @@ static void handle_friend_add(int session, const Message *request,
     int me = sessions[session].account_index;
     int target = find_account(request->content);
 
-    if (target == -1) {
+    if (target == -1)
+    {
         reply(outbox, session, MSG_FRIEND_ADD,
               RESP_FAILURE, "unknown user");
         return;
     }
 
-    if (target == me) {
+    if (target == me)
+    {
         reply(outbox, session, MSG_FRIEND_ADD,
               RESP_FAILURE, "cannot add yourself");
         return;
     }
 
-       int my_id = accounts[me].player_id;
+    int my_id = accounts[me].player_id;
     int target_id = accounts[target].player_id;
 
     int my_slot = find_friend_slot(&accounts[me], target_id);
     int target_slot = find_friend_slot(&accounts[target], my_id);
 
-    if (my_slot != -1 && target_slot != -1) {
+    if (my_slot != -1 && target_slot != -1)
+    {
         reply(outbox, session, MSG_FRIEND_ADD,
               RESP_FAILURE, "already friends");
         return;
@@ -1317,7 +1426,8 @@ static void handle_friend_add(int session, const Message *request,
     if (new_target_slot)
         target_slot = find_free_friend_slot(&accounts[target]);
 
-    if (my_slot == -1 || target_slot == -1) {
+    if (my_slot == -1 || target_slot == -1)
+    {
         reply(outbox, session, MSG_FRIEND_ADD,
               RESP_FAILURE, "friend list full");
         return;
@@ -1326,7 +1436,8 @@ static void handle_friend_add(int session, const Message *request,
     accounts[me].friends_ids[my_slot] = target_id;
     accounts[target].friends_ids[target_slot] = my_id;
 
-    if (save_friends() != 0) {
+    if (save_friends() != 0)
+    {
         if (new_my_slot)
             accounts[me].friends_ids[my_slot] = 0;
 
@@ -1348,13 +1459,15 @@ static void handle_friend_remove(int session, const Message *request,
     int me = sessions[session].account_index;
     int target = find_account(request->content);
 
-    if (target == -1) {
+    if (target == -1)
+    {
         reply(outbox, session, MSG_FRIEND_REMOVE,
               RESP_FAILURE, "unknown user");
         return;
     }
 
-    if (target == me) {
+    if (target == me)
+    {
         reply(outbox, session, MSG_FRIEND_REMOVE,
               RESP_FAILURE, "cannot remove yourself");
         return;
@@ -1366,7 +1479,8 @@ static void handle_friend_remove(int session, const Message *request,
     int my_slot = find_friend_slot(&accounts[me], target_id);
     int target_slot = find_friend_slot(&accounts[target], my_id);
 
-    if (my_slot == -1 && target_slot == -1) {
+    if (my_slot == -1 && target_slot == -1)
+    {
         reply(outbox, session, MSG_FRIEND_REMOVE,
               RESP_FAILURE, "not friends");
         return;
@@ -1378,7 +1492,8 @@ static void handle_friend_remove(int session, const Message *request,
     if (target_slot != -1)
         accounts[target].friends_ids[target_slot] = 0;
 
-    if (save_friends() != 0) {
+    if (save_friends() != 0)
+    {
         if (my_slot != -1)
             accounts[me].friends_ids[my_slot] = target_id;
 
@@ -1402,7 +1517,8 @@ static void handle_friend_list(int session, const Message *request,
     int me = sessions[session].account_index;
     char list[MAX_CONTENT + 1] = "";
 
-    for (int i = 0; i < MAX_FRIENDS; i++) {
+    for (int i = 0; i < MAX_FRIENDS; i++)
+    {
         int friend_id = accounts[me].friends_ids[i];
 
         if (friend_id == 0)
@@ -1420,8 +1536,7 @@ static void handle_friend_list(int session, const Message *request,
             sizeof(list) - current_length,
             "%s%s",
             current_length > 0 ? "," : "",
-            accounts[friend_index].username
-        );
+            accounts[friend_index].username);
     }
 
     reply(outbox, session, MSG_FRIEND_LIST,
@@ -1438,15 +1553,19 @@ static void handle_write_bio(int session, const Message *request,
     size_t line_length = 0;
 
     // Validate bio format
-    if (length >= sizeof(accounts[me].bio)) {
+    if (length >= sizeof(accounts[me].bio))
+    {
         reply(outbox, session, MSG_WRITE_BIO,
               RESP_FAILURE, "bio too long");
         return;
     }
 
-    for (size_t i = 0; i <= length; i++) {
-        if (bio[i] == ';' || bio[i] == '\0') {
-            if (line_length == 0 && length > 0) {
+    for (size_t i = 0; i <= length; i++)
+    {
+        if (bio[i] == ';' || bio[i] == '\0')
+        {
+            if (line_length == 0 && length > 0)
+            {
                 reply(outbox, session, MSG_WRITE_BIO,
                       RESP_FAILURE, "empty bio line");
                 return;
@@ -1455,16 +1574,19 @@ static void handle_write_bio(int session, const Message *request,
             lines++;
             line_length = 0;
 
-            if (lines > MAX_BIO_LINES) {
+            if (lines > MAX_BIO_LINES)
+            {
                 reply(outbox, session, MSG_WRITE_BIO,
                       RESP_FAILURE, "too many bio lines");
                 return;
             }
         }
-        else {
+        else
+        {
             line_length++;
 
-            if (line_length > MAX_BIO_LINE) {
+            if (line_length > MAX_BIO_LINE)
+            {
                 reply(outbox, session, MSG_WRITE_BIO,
                       RESP_FAILURE, "bio line too long");
                 return;
@@ -1486,13 +1608,15 @@ static void handle_read_bio(int session, const Message *request,
     char bio[MAX_CONTENT + 1];
 
     // Check requested account
-    if (account == -1) {
+    if (account == -1)
+    {
         reply(outbox, session, MSG_READ_BIO,
               RESP_FAILURE, "unknown user");
         return;
     }
 
-    if (accounts[account].bio[0] == '\0') {
+    if (accounts[account].bio[0] == '\0')
+    {
         reply(outbox, session, MSG_READ_BIO,
               RESP_SUCCESS, "no bio");
         return;
@@ -1501,25 +1625,86 @@ static void handle_read_bio(int session, const Message *request,
     // Restore line breaks
     size_t j = 0;
 
-    for (size_t i = 0; accounts[account].bio[i] != '\0'; i++) {
+    for (size_t i = 0; accounts[account].bio[i] != '\0'; i++)
+    {
         if (j >= MAX_CONTENT)
             break;
 
         bio[j++] = accounts[account].bio[i] == ';'
-            ? '\n'
-            : accounts[account].bio[i];
+                       ? '\n'
+                       : accounts[account].bio[i];
     }
 
     /*
- * Keep the line separator on the wire. Newlines terminate protocol
- * messages, so the client converts ';' to a display newline.
- */
+     * Keep the line separator on the wire. Newlines terminate protocol
+     * messages, so the client converts ';' to a display newline.
+     */
     snprintf(bio, sizeof(bio), "%s", accounts[account].bio);
 
     reply(outbox, session, MSG_READ_BIO,
-      RESP_SUCCESS, bio);
+          RESP_SUCCESS, bio);
 }
 
+static void handle_ranking(int session,
+                           const Message *request,
+                           Outbox *outbox)
+{
+    (void)request;
+
+    int order[MAX_CLIENTS];
+
+    /* Start with the account indices. */
+    for (int i = 0; i < account_count; i++)
+        order[i] = i;
+
+    /* Sort from highest rating to lowest rating. */
+    for (int i = 0; i < account_count - 1; i++)
+    {
+        for (int j = i + 1; j < account_count; j++)
+        {
+            if (accounts[order[j]].rating >
+                accounts[order[i]].rating)
+            {
+                int temp = order[i];
+                order[i] = order[j];
+                order[j] = temp;
+            }
+        }
+    }
+
+    char ranking[MAX_CONTENT + 1] = "";
+    size_t used = 0;
+
+    for (int i = 0; i < account_count; i++)
+    {
+        int index = order[i];
+
+        int written = snprintf(
+            ranking + used,
+            sizeof(ranking) - used,
+            "%s%s:%d",
+            used > 0 ? "," : "",
+            accounts[index].username,
+            accounts[index].rating
+        );
+
+        if (written < 0 ||
+            (size_t)written >= sizeof(ranking) - used)
+        {
+            break;
+        }
+
+        used += (size_t)written;
+    }
+
+    reply(
+        outbox,
+        session,
+        MSG_RANKING,
+        RESP_SUCCESS,
+        ranking
+    );
+}
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -1541,60 +1726,61 @@ static void handle_read_bio(int session, const Message *request,
 #define ALLOW_OBSERVING \
     (ALLOW(STATE_OBSERVING))
 
-
-typedef struct {
+typedef struct
+{
     const char *type;
     unsigned int allowed_states;
     Handler handler;
 } MessageRule;
 
-
 static const MessageRule message_table[] = {
     // Account
-    { MSG_REGISTER,    ALLOW_BEFORE_LOGIN, handle_register },
-    { MSG_LOGIN,       ALLOW_BEFORE_LOGIN, handle_login },
+    {MSG_REGISTER, ALLOW_BEFORE_LOGIN, handle_register},
+    {MSG_LOGIN, ALLOW_BEFORE_LOGIN, handle_login},
 
     // Lobby
-    { MSG_LIST_ONLINE, ALLOW_LOGGED_IN, handle_list_online },
+    {MSG_LIST_ONLINE, ALLOW_LOGGED_IN, handle_list_online},
 
     // Challenge
-    { MSG_CHALLENGE, ALLOW_LOBBY, handle_challenge },
-    { MSG_ACCEPT,    ALLOW_LOBBY, handle_accept },
-    { MSG_REFUSE,    ALLOW_LOBBY, handle_refuse },
+    {MSG_CHALLENGE, ALLOW_LOBBY, handle_challenge},
+    {MSG_ACCEPT, ALLOW_LOBBY, handle_accept},
+    {MSG_REFUSE, ALLOW_LOBBY, handle_refuse},
 
     // Game
-    { MSG_MOVE,      ALLOW_IN_GAME, handle_move },
-    { MSG_RESIGN, ALLOW_IN_GAME, handle_resign },
+    {MSG_MOVE, ALLOW_IN_GAME, handle_move},
+    {MSG_RESIGN, ALLOW_IN_GAME, handle_resign},
 
     // Chat
-    { MSG_CHAT,      ALLOW_LOGGED_IN, handle_chat },
+    {MSG_CHAT, ALLOW_LOGGED_IN, handle_chat},
 
     // Friends
-    { MSG_FRIEND_ADD,    ALLOW_LOGGED_IN, handle_friend_add },
-    { MSG_FRIEND_REMOVE, ALLOW_LOGGED_IN, handle_friend_remove },
-    { MSG_FRIEND_LIST,   ALLOW_LOGGED_IN, handle_friend_list },
-        // Bio
-    { MSG_WRITE_BIO, ALLOW_LOGGED_IN, handle_write_bio },
-    { MSG_READ_BIO,  ALLOW_LOGGED_IN, handle_read_bio },
-};
+    {MSG_FRIEND_ADD, ALLOW_LOGGED_IN, handle_friend_add},
+    {MSG_FRIEND_REMOVE, ALLOW_LOGGED_IN, handle_friend_remove},
+    {MSG_FRIEND_LIST, ALLOW_LOGGED_IN, handle_friend_list},
+    // Bio
+    {MSG_WRITE_BIO, ALLOW_LOGGED_IN, handle_write_bio},
+    {MSG_READ_BIO, ALLOW_LOGGED_IN, handle_read_bio},
 
+    //Elo
+    {MSG_RANKING, ALLOW_LOGGED_IN, handle_ranking },
+};
 
 #define MESSAGE_TABLE_SIZE \
     ((int)(sizeof(message_table) / sizeof(message_table[0])))
 
-
 // Returns the rule for this type, or NULL if unknown.
 static const MessageRule *find_rule(const char *type)
 {
-    for (int i = 0; i < MESSAGE_TABLE_SIZE; i++) {
-        if (strcmp(message_table[i].type, type) == 0) {
+    for (int i = 0; i < MESSAGE_TABLE_SIZE; i++)
+    {
+        if (strcmp(message_table[i].type, type) == 0)
+        {
             return &message_table[i];
         }
     }
 
     return NULL;
 }
-
 
 // ================================================================
 // 5. PUBLIC FUNCTIONS
@@ -1608,18 +1794,20 @@ int logic_init(void)
     account_count = 0;
     next_player_id = 1;
 
-   
-
-    if (load_accounts() != 0) {
+    if (load_accounts() != 0)
+    {
         DeleteCriticalSection(&logic_lock);
         return -1;
     }
 
-    if (load_friends() != 0) {
-    DeleteCriticalSection(&logic_lock);
-    return -1;}
+    if (load_friends() != 0)
+    {
+        DeleteCriticalSection(&logic_lock);
+        return -1;
+    }
 
-    for (int i = 0; i < MAX_CLIENTS; i++) {
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
         sessions[i].in_use = 0;
         sessions[i].account_index = -1;
         sessions[i].state = STATE_CONNECTED;
@@ -1628,7 +1816,8 @@ int logic_init(void)
         sessions[i].generation = 0;
     }
 
-    for (int i = 0; i < MAX_GAMES; i++) {
+    for (int i = 0; i < MAX_GAMES; i++)
+    {
         matches[i].in_use = 0;
     }
 
@@ -1637,10 +1826,10 @@ int logic_init(void)
     return 0;
 }
 
-
 int logic_connect(unsigned int *generation)
 {
-    if (generation == NULL) {
+    if (generation == NULL)
+    {
         return -1;
     }
 
@@ -1648,14 +1837,17 @@ int logic_connect(unsigned int *generation)
 
     EnterCriticalSection(&logic_lock);
 
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (!sessions[i].in_use) {
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (!sessions[i].in_use)
+        {
             index = i;
             break;
         }
     }
 
-    if (index != -1) {
+    if (index != -1)
+    {
         Session *session = &sessions[index];
 
         session->in_use = 1;
@@ -1674,14 +1866,13 @@ int logic_connect(unsigned int *generation)
     return index;
 }
 
-
 void logic_handle_message(
     int session_index,
     const Message *request,
-    Outbox *outbox
-)
+    Outbox *outbox)
 {
-    if (request == NULL || outbox == NULL) {
+    if (request == NULL || outbox == NULL)
+    {
         return;
     }
 
@@ -1690,33 +1881,33 @@ void logic_handle_message(
     if (
         session_index < 0 ||
         session_index >= MAX_CLIENTS ||
-        !sessions[session_index].in_use
-    ) {
+        !sessions[session_index].in_use)
+    {
         printf(
             "Error: message from invalid session %d.\n",
-            session_index
-        );
+            session_index);
         goto end;
     }
 
     const MessageRule *rule = find_rule(request->type);
 
     // Unknown message type.
-    if (rule == NULL) {
+    if (rule == NULL)
+    {
         reply(
             outbox,
             session_index,
             MSG_ERROR,
             RESP_FAILURE,
-            "unknown message"
-        );
+            "unknown message");
         goto end;
     }
 
     // Check whether the message is allowed in this state.
     SessionState state = sessions[session_index].state;
 
-    if ((rule->allowed_states & ALLOW(state)) == 0) {
+    if ((rule->allowed_states & ALLOW(state)) == 0)
+    {
         const char *reason =
             (state == STATE_CONNECTED)
                 ? "not logged in"
@@ -1727,8 +1918,7 @@ void logic_handle_message(
             session_index,
             rule->type,
             RESP_FAILURE,
-            reason
-        );
+            reason);
 
         goto end;
     }
@@ -1740,11 +1930,10 @@ end:
     LeaveCriticalSection(&logic_lock);
 }
 
-
-
 void logic_disconnect(int session_index, Outbox *outbox)
 {
-    if (outbox == NULL) {
+    if (outbox == NULL)
+    {
         return;
     }
 
@@ -1753,8 +1942,8 @@ void logic_disconnect(int session_index, Outbox *outbox)
     if (
         session_index < 0 ||
         session_index >= MAX_CLIENTS ||
-        !sessions[session_index].in_use
-    ) {
+        !sessions[session_index].in_use)
+    {
         goto end;
     }
 
@@ -1772,8 +1961,8 @@ void logic_disconnect(int session_index, Outbox *outbox)
             m < MAX_GAMES &&
             matches[m].in_use &&
             me >= 0 &&
-            me < account_count
-        ) {
+            me < account_count)
+        {
             int winner = opponent_of(m, me);
 
             end_match(outbox, m, winner, "left", session_index);

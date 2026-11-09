@@ -1,7 +1,11 @@
+
 #include <stdio.h>
 #include <winsock2.h>
 #include <string.h>
 #include <conio.h> //Reads unentered data
+
+#define STRINGIFY_INNER(x) #x
+#define STRINGIFY(x) STRINGIFY_INNER(x)
 
 #include "network.h"
 #include "game.h"
@@ -53,13 +57,13 @@ int register_acc(SOCKET client_socket)
     if (send_message(client_socket, &message) != 0)
     {
         printf("Failed to send registration request.\n");
-        return -1;
+        return -2;
     }
 
     if (receive_message(client_socket, &response) != 0)
     {
         printf("Failed to receive registration response.\n");
-        return -1;
+        return -2;
     }
 
     if (strcmp(response.type, MSG_REGISTER) != 0)
@@ -128,19 +132,19 @@ int log_in(SOCKET client_socket)
     if (send_message(client_socket, &message) != 0)
     {
         printf("Failed to send login request.\n");
-        return -1;
+        return -2;
     }
 
     if (receive_message(client_socket, &response) != 0)
     {
         printf("Failed to receive login response.\n");
-        return -1;
+        return -2;
     }
 
     if (strcmp(response.type, MSG_LOGIN) != 0)
     {
         printf("Unexpected server response.\n");
-        return -1;
+        return -2;
     }
 
     if (response.response != RESP_SUCCESS)
@@ -155,7 +159,7 @@ int log_in(SOCKET client_socket)
     if (receive_message(client_socket, &onl_list) != 0)
     {
         printf("Failed to receive online players list.\n");
-        return -1;
+        return -2;
     }
 
     if (strcmp(onl_list.type, MSG_PLAYERS_ONLINE) == 0)
@@ -166,6 +170,7 @@ int log_in(SOCKET client_socket)
     else
     {
         printf("Unexpected online players response.\n");
+        return -2;
     }
 
     return 0;
@@ -340,6 +345,54 @@ int respond_to_challenge(SOCKET client_socket, char *challenger)
     else
     {
         printf("Challenge refused.\n");
+    }
+
+    return 0;
+}
+int show_ranking(SOCKET client_socket)
+{
+    Message request = {0};
+    Message response;
+
+    strcpy(request.type, MSG_RANKING);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    request.receiver = 0;
+
+    if (send_message(client_socket, &request) != 0)
+    {
+        printf("Failed to request the ranking.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, &response) != 0)
+    {
+        printf("Failed to receive the ranking.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_RANKING) != 0)
+    {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (response.response != RESP_SUCCESS)
+    {
+        printf("Could not retrieve ranking: %s\n",
+               response.content);
+        return -1;
+    }
+
+    printf("\n===== PLAYER RANKING =====\n");
+
+    if (response.content[0] == '\0')
+    {
+        printf("No registered players.\n");
+    }
+    else
+    {
+        printf("%s\n", response.content);
     }
 
     return 0;
@@ -1327,7 +1380,9 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
         printf("6. Remove a friend\n");
         printf("7. Show friends\n");
         printf("8. Chat with a player\n");
-        printf("9. Quit\n");
+        printf("8. Chat with a player\n");
+        printf("9. Show player ranking\n");
+        printf("10. Quit\n");
         printf("Choose an option: ");
 
         lobby_status = read_lobby_choice(choice, sizeof(choice), client_socket, &game_start);
@@ -1435,6 +1490,10 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
 
         else if (strcmp(choice, "9") == 0)
         {
+            show_ranking(client_socket);
+        }
+        else if (strcmp(choice, "10") == 0)
+        {
             return 0;
         }
     }
@@ -1444,6 +1503,7 @@ int initial_menu(SOCKET client_socket)
 {
 
     char choice[16];
+    int registration_status;
 
     while (1)
     {
@@ -1466,7 +1526,14 @@ int initial_menu(SOCKET client_socket)
         if (strcmp(choice, "1\n") == 0)
         {
             // Handle registration
-            if (register_acc(client_socket) == 0)
+            registration_status = register_acc(client_socket);
+
+            if (registration_status == -2)
+            {
+                return -1;
+            }
+
+            if (registration_status == 0)
             {
                 printf("\nReturning to main menu...\n");
             }
@@ -1488,6 +1555,76 @@ int initial_menu(SOCKET client_socket)
     }
 }
 
+int request_ranking(SOCKET client_socket)
+{
+    Message message = {0};
+    Message response;
+
+    // Build ranking request
+    strcpy(message.type, MSG_RANKING);
+    message.response = RESP_NONE;
+    message.mode = MODE_NONE;
+    message.receiver = 0;
+    message.content[0] = '\0';
+
+    // Send request
+    if (send_message(client_socket, &message) != 0)
+    {
+        printf("Failed to send ranking request.\n");
+        return -1;
+    }
+
+    // Receive response
+    if (receive_message(client_socket, &response) != 0)
+    {
+        printf("Failed to receive ranking response.\n");
+        return -1;
+    }
+
+    // Check response type
+    if (strcmp(response.type, MSG_RANKING) != 0)
+    {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    // Check success
+    if (response.response != RESP_SUCCESS)
+    {
+        printf("Failed to retrieve ranking: %s\n", response.content);
+        return -1;
+    }
+
+    // Display ranking
+    printf("\n========== AWALE RANKING ==========\n");
+    printf("%-5s %-20s %s\n", "Rank", "Username", "Rating");
+    printf("-----------------------------------\n");
+
+    char content[MAX_CONTENT];
+    snprintf(content, sizeof(content), "%s", response.content);
+
+    int rank = 1;
+    char *entry = strtok(content, ",");
+
+    while (entry != NULL)
+    {
+        char username[MAX_NAME + 1];
+        int rating;
+
+        if (sscanf(entry, "%" STRINGIFY(MAX_NAME) "[^:]:%d",
+           username, &rating) == 2){
+            printf("%-5d %-20s %d\n", rank, username, rating);
+            rank++;
+        }
+
+        entry = strtok(NULL, ",");
+    }
+
+    printf("===================================\n");
+
+    return 0;
+}
+
 int main(void)
 {
     WSADATA wsa;
@@ -1496,6 +1633,9 @@ int main(void)
     int game_id;
     int side;
     char opponent[MAX_NAME + 1];
+    int menu_choice;
+    int login_status;
+    int logged_in = 0;
 
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
     {
@@ -1528,29 +1668,58 @@ int main(void)
 
     printf("Connected to server.\n");
 
-    int menu_choice = initial_menu(client_socket);
-
-    if (menu_choice == 2)
+    while (!logged_in)
     {
-        if (log_in(client_socket) == 0)
+        menu_choice = initial_menu(client_socket);
+
+        if (menu_choice == 0)
         {
-            printf("\nLogin completed. Welcome to the lobby!\n");
+            break;
+        }
 
-            while (1)
+        if (menu_choice == -1)
+        {
+            printf("Connection lost. Exiting.\n");
+            break;
+        }
+
+        if (menu_choice == 2)
+        {
+            login_status = log_in(client_socket);
+
+            if (login_status == 0)
             {
+                logged_in = 1;
+                printf("\nLogin completed. Welcome to the lobby!\n");
+            }
+            else if (login_status == -1)
+            {
+                printf("\nReturning to main menu...\n");
+            }
+            else
+            {
+                printf("\nConnection lost. Exiting.\n");
+                break;
+            }
+        }
+    }
 
-                int lobby_status = lobby_menu(client_socket, &game_id, &side,
-                                              opponent, sizeof(opponent));
+    if (logged_in)
+    {
+        while (1)
+        {
 
-                if (lobby_status != 2)
-                {
-                    break;
-                }
+            int lobby_status = lobby_menu(client_socket, &game_id, &side,
+                                          opponent, sizeof(opponent));
 
-                if (play_game(client_socket, game_id, side, opponent) == -1)
-                {
-                    break;
-                }
+            if (lobby_status != 2)
+            {
+                break;
+            }
+
+            if (play_game(client_socket, game_id, side, opponent) == -1)
+            {
+                break;
             }
         }
     }

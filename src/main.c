@@ -6,82 +6,106 @@
 
 int main(void)
 {
-    Game game;
-    int hole_index;
-    int result;
-    char input[100];
-    char *end;
-    long value;
+    WSADATA wsa;
+    SOCKET client_socket;
+    struct sockaddr_in server_addr;
+    int game_id;
+    int side;
+    int menu_choice;
+    int login_status;
+    int logged_in = 0;
+    char opponent[MAX_NAME + 1];
 
-    init_game(&game);
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+    {
+        printf("Winsock initialization failed.\n");
+        return 1;
+    }
 
-    while (!game.finished) {
-        print_board(&game);
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
 
-        printf("\nPlayer %d, choose a hole (0-11), or q to quit: ",
-               game.current_player + 1);
+    if (client_socket == INVALID_SOCKET)
+    {
+        printf("Socket creation failed.\n");
+        WSACleanup();
+        return 1;
+    }
 
-        if (fgets(input, sizeof(input), stdin) == NULL) {
-            printf("\nInput ended. Exiting game.\n");
-            return 0;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(client_socket, (struct sockaddr *)&server_addr,
+                sizeof(server_addr)) == SOCKET_ERROR)
+    {
+        printf("Connection failed: %d\n", WSAGetLastError());
+        closesocket(client_socket);
+        WSACleanup();
+        return 1;
+    }
+
+    printf("Connected to server.\n");
+
+    // Start menu and login
+    while (!logged_in)
+    {
+        menu_choice = initial_menu(client_socket);
+
+        if (menu_choice == 0)
+        {
+            break;
         }
 
-        // Allow the player to quit
-        if (input[0] == 'q' || input[0] == 'Q') {
-            printf("Game abandoned.\n");
-            return 0;
+        if (menu_choice == -1)
+        {
+            printf("Connection lost. Exiting.\n");
+            break;
         }
 
-        // Convert input into a number
-        value = strtol(input, &end, 10);
+        if (menu_choice == 2)
+        {
+            login_status = log_in(client_socket);
 
-        // Reject invalid input
-        if (end == input) {
-            printf("Invalid input. Enter a number.\n");
-            continue;
-        }
-
-        while (isspace((unsigned char)*end)) {
-            end++;
-        }
-
-        if (*end != '\0') {
-            printf("Invalid input. Enter a single number.\n");
-            continue;
-        }
-
-        if (value < 0 || value > 11) {
-            printf("Invalid hole. Choose between 0 and 11.\n");
-            continue;
-        }
-
-        hole_index = (int)value;
-
-        result = sow(&game, hole_index);
-
-        if (result != 0) {
-            printf("Invalid move. Try again.\n");
-            continue;
+            if (login_status == 0)
+            {
+                logged_in = 1;
+                printf("\nLogin completed. Welcome to the lobby!\n");
+            }
+            else if (login_status == -1)
+            {
+                printf("\nReturning to main menu...\n");
+            }
+            else if (login_status == -2)
+            {
+                printf("\nConnection lost. Exiting.\n");
+                break;
+            }
         }
     }
 
-    print_board(&game);
+    // Lobby and games
+    if (logged_in)
+    {
+        while (1)
+        {
+            int lobby_status = lobby_menu(client_socket, &game_id, &side,
+                                          opponent, sizeof(opponent));
 
-    printf("\nGame over!\n");
+            if (lobby_status != 2)
+            {
+                break;
+            }
 
-    printf("Final score: Player 1: %d | Player 2: %d\n",
-           game.captures[0],
-           game.captures[1]);
+            if (play_game(client_socket, game_id, side, opponent) == -1)
+            {
+                break;
+            }
+        }
+    }
 
-    if (game.captures[0] > game.captures[1]) {
-        printf("Player 1 wins!\n");
-    }
-    else if (game.captures[1] > game.captures[0]) {
-        printf("Player 2 wins!\n");
-    }
-    else {
-        printf("Draw!\n");
-    }
+    closesocket(client_socket);
+    WSACleanup();
 
     return 0;
 }

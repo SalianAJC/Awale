@@ -106,6 +106,7 @@ Every field travels as text, never as a raw struct or a pointer.
 #define BIO_SEP ';'
 #define MAX_SAVED_GAMES 100
 #define START_RATING 1200
+#define ELO_K 32
 //Envelope
 
 typedef struct {
