@@ -393,10 +393,11 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
     //Create a game, messages and play start
     Game game;
     Message message = {0};
-    char input[16];
+    char input[MAX_CONTENT + 1];
     int input_size = 0;
     int awaiting_update = 0;
     int resigning = 0;
+    int chat_mode = 0;
 
     init_game(&game);
     game.id = game_id;
@@ -410,10 +411,11 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
     print_board(&game);
 
     if (game.current_player == side) {
-        printf("\nEnter a hole (0-11), or R to resign.\n");
+        printf("\nEnter a hole (0-11), R to resign, or CH to chat.\n");
         printf("Your move: ");
     } else {
         printf("\nWaiting for opponent's move...\n");
+        printf("Type CH to open the chat.\n");
     }
 
 
@@ -436,7 +438,36 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 return -1;
             }
 
-            if (strcmp(incoming.type, MSG_BOARD_UPDATE) == 0) { //Update board
+            //Receive chat messages
+            if (strcmp(incoming.type, MSG_CHAT) == 0) {
+
+                if (incoming.response == RESP_NONE) {
+                    printf("\n[CHAT] %s\n", incoming.content);
+                }
+                else if (incoming.response == RESP_SUCCESS) {
+                    printf("\n[CHAT] Message sent.\n");
+                }
+                else {
+                    printf("\n[CHAT] Failed: %s\n", incoming.content);
+                }
+
+                //Restore current prompt
+                if (chat_mode) {
+                    printf("Chat: ");
+                    if (input_size > 0) {
+                        fwrite(input, 1, input_size, stdout);
+                    }
+                }
+                else if (game.current_player == side) {
+                    printf("Your move: ");
+                }
+                else {
+                    printf("Waiting for opponent's move...\n");
+                    printf("Type CH to open the chat.\n");
+                }
+            }
+
+            else if (strcmp(incoming.type, MSG_BOARD_UPDATE) == 0) { //Update board
 
                 int received;
                 int hole;
@@ -456,16 +487,27 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 }
 
                 awaiting_update = 0;
-                input_size = 0;
-                input[0] = '\0';
+
+                if (!chat_mode) {
+                    input_size = 0;
+                    input[0] = '\0';
+                }
 
                 printf("\n");
                 print_board(&game);
 
-                if (game.current_player == side) {
+                //Keep chat open during board updates
+                if (chat_mode) {
+                    printf("\nChat: ");
+                    if (input_size > 0) {
+                        fwrite(input, 1, input_size, stdout);
+                    }
+                }
+                else if (game.current_player == side) {
                     printf("\nYour move: ");
                 } else {
                     printf("\nWaiting for opponent's move...\n");
+                    printf("Type CH to open the chat.\n");
                 }
 
             }
@@ -549,8 +591,8 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
             }
         }
 
-        if (_kbhit() && !awaiting_update && !resigning &&
-            game.current_player == side) { //Check if the keyboard has been pressed
+        //Read keyboard input without blocking socket messages
+        if (_kbhit() && !awaiting_update && !resigning) {
 
             int ch = _getch();
 
@@ -558,7 +600,72 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
 
                 input[input_size] = '\0';
 
-                if (strcmp(input, "r") == 0 || strcmp(input, "R") == 0) {
+                //Chat mode
+                if (chat_mode) {
+
+                    //Exit chat
+                    if (strcmp(input, "EXIT") == 0 ||
+                        strcmp(input, "exit") == 0) {
+
+                        chat_mode = 0;
+                        printf("\nLeaving chat.\n");
+
+                        if (game.current_player == side) {
+                            printf("Your move: ");
+                        } else {
+                            printf("Waiting for opponent's move...\n");
+                            printf("Type CH to open the chat.\n");
+                        }
+                    }
+
+                    //Send chat message
+                    else if (input_size > 0) {
+
+                        char chat_content[MAX_NAME + MAX_CHAT + 2];
+
+                        memset(&message, 0, sizeof(message));
+
+                        strcpy(message.type, MSG_CHAT);
+                        message.response = RESP_NONE;
+                        message.mode = MODE_PLAYER;
+                        message.receiver = 0;
+
+                        snprintf(chat_content, sizeof(chat_content),
+                                 "%s %s", opponent, input);
+
+                        snprintf(message.content, sizeof(message.content),
+                                 "%s", chat_content);
+
+                        if (send_message(client_socket, &message) != 0) {
+                            printf("\nFailed to send chat message.\n");
+                            return -1;
+                        }
+                    }
+
+                    if (chat_mode) {
+                        printf("Chat: ");
+                    }
+                }
+
+                //Open chat
+                else if (strcmp(input, "CH") == 0 ||
+                         strcmp(input, "ch") == 0) {
+
+                    chat_mode = 1;
+                    printf("\n===== GAME CHAT =====\n");
+                    printf("Type EXIT to return to the game.\n");
+                    printf("Chat: ");
+                }
+
+                else if (game.current_player != side) {
+
+                    printf("\nIt's not your turn.\n");
+                    printf("Waiting for opponent's move...\n");
+                    printf("Type CH to open the chat.\n");
+                }
+
+                else if (strcmp(input, "r") == 0 ||
+                         strcmp(input, "R") == 0) {
 
                     //Send resignation
 
@@ -628,7 +735,8 @@ int play_game(SOCKET client_socket, int game_id, int side, char *opponent){
                 }
             }
 
-            else if (ch >= 32 && ch <= 126 && input_size < 15) {
+            else if (ch >= 32 && ch <= 126 &&
+                     input_size < (chat_mode ? MAX_CHAT : 15)) {
 
                 input[input_size++] = (char)ch;
                 printf("%c", ch);
@@ -651,15 +759,15 @@ int write_bio(SOCKET client_socket) {
            MAX_BIO_LINES, MAX_BIO_LINE);
     printf("Press Enter on an empty line to finish.\n");
 
-    //While the lines are les sthan the max
+    //Read bio lines
     while (lines < MAX_BIO_LINES) {
         printf("Line %d: ", lines + 1);
 
-        if (fgets(line, sizeof(line), stdin) == NULL) {//If it's null error
+        if (fgets(line, sizeof(line), stdin) == NULL) {
             return -1;
         }
 
-        size_t length = strlen(line); 
+        size_t length = strlen(line);
 
         if (length > 0 && line[length - 1] == '\n') {
             line[length - 1] = '\0';
@@ -684,7 +792,7 @@ int write_bio(SOCKET client_socket) {
         lines++;
     }
 
-    // Sender module
+    //Send bio
     strcpy(message.type, MSG_WRITE_BIO);
     message.response = RESP_NONE;
     message.mode = MODE_NONE;
@@ -717,16 +825,17 @@ int write_bio(SOCKET client_socket) {
     return -1;
 }
 
+
 //Bio reader
 
 int read_bio(SOCKET client_socket) {
     char username[MAX_NAME + 2]; //Username
-    Message message = {0}; 
+    Message message = {0};
     Message response;
 
-    printf("Enter the username whose bio you want to read: "); 
+    printf("Enter the username whose bio you want to read: ");
 
-    if (fgets(username, sizeof(username), stdin) == NULL) {//If the username's null we die
+    if (fgets(username, sizeof(username), stdin) == NULL) {
         return -1;
     }
 
@@ -749,7 +858,7 @@ int read_bio(SOCKET client_socket) {
         return -1;
     }
 
-    //Bio request sending module
+    //Send bio request
     strcpy(message.type, MSG_READ_BIO);
     message.response = RESP_NONE;
     message.mode = MODE_NONE;
@@ -782,6 +891,7 @@ int read_bio(SOCKET client_socket) {
     printf("Could not retrieve bio: %s\n", response.content);
     return -1;
 }
+
 
 //Adding a friend
 
@@ -929,6 +1039,7 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
 
     while (1) {
 
+        printf("\n===== LOBBY =====\n");
         printf("1. Show online players\n");
         printf("2. Challenge a player\n");
         printf("3. Write your bio\n");
@@ -937,6 +1048,7 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
         printf("6. Remove a friend\n");
         printf("7. Show friends\n");
         printf("8. Quit\n");
+        printf("Choose an option: ");
 
         lobby_status = read_lobby_choice(choice, sizeof(choice), client_socket, &game_start);
 
