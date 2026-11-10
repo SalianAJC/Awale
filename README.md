@@ -17,6 +17,7 @@ Authors: Omar HOLEIHEL and Samuel Villamil, INSA Lyon 4IF, Programmation Réseau
 | Server picks who starts at random | Done |
 | Server checks every move (turn, side, empty hole, starving rule) | Done |
 | Several games at the same time | Done (up to 25) |
+| Players on different machines (the client takes the server's address) | Done |
 | Resign | Done |
 | Disconnection during a game: the other player wins | Done |
 | Chat, in the lobby and during a game | Done |
@@ -59,6 +60,7 @@ The Makefile detects the system and chooses the compiler and the run command aut
 | `make test-logic` | Runs the server logic tests (registration, challenges, moves, chat, ELO, observing, private mode) |
 | `make test-e2e` | Runs the end-to-end game scenarios (full games, resignations, disconnections, two games at once, watched games, private mode) |
 | `make test-all` | Runs all the tests above |
+| `make test-network` | Runs the real server and client over 127.0.0.1 and over the machine's network address (Linux only, not part of `test-all`) |
 | `make clean` | Deletes the compiled files in `target/` |
 
 ---
@@ -66,9 +68,17 @@ The Makefile detects the system and chooses the compiler and the run command aut
 ## 3. Running
 
 1. Start the server first: `make run-server`. It listens on port **8080** and prints a line for every connection, message and disconnection.
-2. Start one client per player, each in its own terminal: `make run-client`. Clients connect to `127.0.0.1:8080`, so they must run on the same machine as the server.
+2. Start one client per player, each in its own terminal: `make run-client`. By default the client connects to `127.0.0.1:8080`, the server on the same machine.
 
-To play, open at least three terminals: one server and two clients.
+**Playing from another machine.** The server accepts connections on every network interface. Find its address on the server machine with `hostname -I` (Linux) or `ipconfig` (Windows), for example `192.168.1.42`, then on the other machine:
+
+```
+make run-client SERVER_IP=192.168.1.42
+```
+
+or run the client directly with the address as its only argument: `target/client.exe 192.168.1.42` (`wine target/client.exe 192.168.1.42` on Linux). Both machines must be on the same network, and the network must allow connections between devices (some public or university Wi-Fi networks do not; a phone hotspot works). An invalid address is refused with `Invalid server address`, and an unreachable server with `Connection failed`.
+
+To play on one machine, open at least three terminals: one server and two clients.
 
 On Linux, if typing in the client misbehaves under Wine, start it in a Windows console instead: `wineconsole target/client.exe`.
 
@@ -244,11 +254,12 @@ The tests call the server logic directly, without any network, and check every r
 | `test_private_mode` | the demo story: a stranger is refused, asks by chat, is added as a friend and can watch; both players private; unfriending; private mode off |
 | `test_observer_leaves` | an observer disconnects, a new client reuses the slot, the observer comes back, a player leaves while watched |
 
+`make test-network` (Linux only): starts the real `server.exe`, then runs the real `client.exe` against it, typing the menu choices for it. It checks the default address, `127.0.0.1`, and the machine's own network address (the one another computer would use), registers an account over that address and checks the server sees it from both, refuses invalid addresses, and fails cleanly when the server is stopped. The test server keeps its files in `target/network_test/`.
+
 ---
 
 ## 8. Known limitations
 
-- The client connects to `127.0.0.1` only: all players must be on the same machine as the server.
 - Bios and private mode are not saved to disk.
 - The online list and the ranking are shown in their raw form (`alice:L,bob:G`, `bob:1216,alice:1184`). The ranking stops at about 25 players with long names, because one message holds at most 1024 characters.
 - A game in progress cannot be resumed after a disconnection: the player who left loses.
