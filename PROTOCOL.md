@@ -1,6 +1,6 @@
 # Awale protocol specification
 
-This document is the contract between the client and the server. It describes the protocol **as implemented** in the submitted version. Messages that were designed but not implemented are listed separately in section 9.
+This document is the contract between the client and the server. It describes the protocol **as implemented** in the submitted version. Messages that were designed but not implemented are listed separately in section 10.
 
 ---
 
@@ -50,6 +50,8 @@ Replies produced before any handler runs:
 | Known TYPE, sender not logged in | `<TYPE>\|F\|-\|0\|not logged in` |
 | Known TYPE, not allowed in the sender's current state | `<TYPE>\|F\|-\|0\|not allowed now` |
 
+These replies always use mode `-`, whatever the type.
+
 ### 2.3 Inside CONTENT
 
 - **Values are separated by one space**: `bob good luck`.
@@ -66,16 +68,17 @@ Replies produced before any handler runs:
 | `CONNECTED` | Socket open, not logged in |
 | `LOBBY` | Logged in, not playing |
 | `IN_GAME` | Playing a game |
-| `OBSERVING` | Watching a game (reserved, see section 9) |
+| `OBSERVING` | Watching a game (section 9) |
 
 Which messages are allowed in which state (the server's message table):
 
 | Message | CONNECTED | LOBBY | IN_GAME | OBSERVING |
 |---|:-:|:-:|:-:|:-:|
 | `R`, `L` | yes | | | |
-| `LO`, `M`, `W`, `Rb`, `Fa`, `Fr`, `Fl`, `Rk` | | yes | yes | yes |
-| `C`, `A`, `Rf` | | yes | | |
+| `LO`, `M`, `W`, `Rb`, `Fa`, `Fr`, `Fl`, `Rk`, `LG`, `Pv` | | yes | yes | yes |
+| `C`, `A`, `Rf`, `O` | | yes | | |
 | `Mo`, `Rs` | | | yes | |
+| `Ox` | | | | yes |
 
 ### 2.5 Sides and who starts
 
@@ -169,7 +172,7 @@ Failures, in this order:
 | no such account | `unknown user` |
 | the sender challenges themselves | `cannot challenge yourself` |
 | B is offline | `user offline` |
-| B is not in the lobby | `user busy` |
+| B is not in the lobby (in a game or watching one) | `user busy` |
 
 ### `Ch` Challenged (push)
 
@@ -225,7 +228,7 @@ The board is not sent: every game starts with 4 seeds in each hole.
 - Allowed: `IN_GAME`
 - Request: `Mo|-|P|0|<hole>`, hole `0` to `11`
 - Success: `Mo|S|P|0|<hole>`. This is only an acknowledgement: **clients apply a move only when the `Bu` push arrives**, the mover included.
-- Then: a `Bu` push to both players, then a `Go` push if the move ended the game
+- Then: a `Bu` push to both players and to every observer, then a `Go` push if the move ended the game
 
 Failures, in this order (replies use mode `P`):
 
@@ -241,7 +244,7 @@ Failures, in this order (replies use mode `P`):
 Bu|-|P|0|<game_id> <hole>
 ```
 
-Sent to both players after every legal move. Every receiver plays the move with `sow()` on its own copy of the game. Server and clients run the same `game.c`, so all copies of the board stay identical, and only one number travels per move.
+Sent to both players (mode `P`) and to every observer of the game (mode `O`) after every legal move. A refused move sends nothing. Every receiver plays the move with `sow()` on its own copy of the game. Server and clients run the same `game.c`, so all copies of the board stay identical, and only one number travels per move.
 
 ### `Rs` Resign
 
@@ -264,9 +267,9 @@ Go|-|P|0|<game_id> <captures_side0> <captures_side1> <winner> <reason>
 | `resign` | A player resigned |
 | `left` | A player disconnected (section 7) |
 
-- Sent to both players, except one who has just disconnected.
+- Sent to both players (mode `P`) and to every observer (mode `O`), with the same content, except to a player who has just disconnected.
 - The ELO ratings are updated before it is sent (section 8).
-- State change: both players go back to `LOBBY` and can challenge again.
+- State change: both players and every observer go back to `LOBBY`. The game is removed from `LG`.
 
 ```
 Go|-|P|0|3 27 21 alice end
@@ -280,7 +283,8 @@ When `receive_message` fails on a client's socket, the server treats the client 
 
 1. **In a game**: the game ends and the remaining player wins. They receive `Go ... <winner> left`. The ratings are updated: leaving counts as a loss.
 2. **Challenges**: everyone who had challenged the leaver receives an `Rf` push from them. The leaver's own outgoing challenge is dropped.
-3. The account is kept and marked offline. The player can log in again from a new client.
+3. **Watching a game**: the observer is removed from the game. Nobody is told, and the game goes on.
+4. The account is kept and marked offline. The player can log in again from a new client.
 
 **A game in progress cannot be resumed after a disconnection.** This is a deliberate choice: it keeps the server's state simple, and the remaining player is never left waiting.
 
@@ -372,31 +376,87 @@ B is updated symmetrically, from the ratings before the game. A resignation and 
 
 ---
 
-## 9. Designed but not implemented
+## 9. Observing and private mode
+
+### `LG` List running games
+
+- Allowed: any logged-in state
+- Request: `LG|-|-|0|` (content ignored)
+- Success: `LG|S|-|0|<id>:<side0>:<side1>:<pub|priv>,...`, in no particular order. Empty when no game is running.
+- `priv` when at least one of the two players has private mode on.
+
+```
+LG|S|-|0|1:bob:alice:pub,2:erin:dave:priv
+```
+
+### `O` Observe
+
+- Allowed: `LOBBY`
+- Request: `O|-|-|0|<game_id>`
+- Success, mode `O`: `O|S|O|0|<game_id> <side0> <side1> <moves>`, where `<moves>` is every hole played so far, separated by commas, empty if no move yet. The new observer starts from a fresh board and plays these moves with `sow()`, then applies each `Bu` that follows.
+- State change: `LOBBY` → `OBSERVING`
+
+```
+O|S|O|0|1 bob alice 0,6,1      three moves already played
+O|S|O|0|1 bob alice            no move yet (ends with a space)
+```
+
+Failures, in this order (mode `O`):
+
+| Condition | Reason |
+|---|---|
+| not a whole number from 1 to 2147483647 | `bad format` |
+| no running game with this id | `no such game` |
+| one of the players is private and the sender is not their friend | `game is private` |
+| 10 observers already (`MAX_OBSERVERS`) | `game full` |
+| the move list does not fit in one message | `game data too large` |
+
+From then on the observer receives the game's `Bu` and `Go` pushes with mode `O`. While observing, `C`, `A`, `Rf`, `Mo`, `Rs` and a second `O` are refused (`not allowed now`), and other players cannot challenge the observer (`user busy`). Chat, bio, friends, `LO`, `LG`, `Rk` and `Pv` still work.
+
+### `Ox` Stop observing
+
+- Allowed: `OBSERVING`
+- Request: `Ox|-|-|0|`
+- Success: `Ox|S|-|0|`. No more `Bu` or `Go` from that game.
+- State change: `OBSERVING` → `LOBBY`
+
+When the game ends, observers receive `Go` and go back to the lobby on their own: they do not send `Ox`.
+
+### `Pv` Private mode
+
+- Allowed: any logged-in state, including during a game
+- Request: `Pv|-|-|0|on` or `Pv|-|-|0|off`
+- Success: `Pv|S|-|0|on` or `Pv|S|-|0|off`. Setting the same value twice is allowed.
+- Failure: `bad format`, for anything other than exactly `on` or `off` (case-sensitive, no spaces)
+
+Rules:
+- A player with private mode on can only be watched by their friends. To watch a game, the sender must be allowed by **both** players: a public player allows everyone, a private one only their friends.
+- It only limits `O`. Private players are still listed in `LO` and `LG`, and can still be challenged, sent chat messages and have their bio read.
+- It is checked when `O` is received. Turning it on does not remove observers already watching, and sends nobody a message.
+- It applies to the games running now and to future ones, and is kept when the player logs in again. It is kept in memory only, and is reset to `off` when the server restarts.
+
+---
+
+## 10. Designed but not implemented
 
 These codes exist in `protocol.h` and were specified during the design, but no handler implements them. The server answers them with `E|F|-|0|unknown message`.
 
 | Code | Purpose |
 |---|---|
-| `LG` | List running games: `<id>:<side0>:<side1>:<pub\|priv>,...` |
-| `O`, `Ox` | Start / stop observing a game. Observers would receive `Bu` and `Go` with mode `O` |
-| `Pv` | Private mode on/off: only friends may observe your games |
 | `Hl`, `RG` | List finished games, and replay one move by move |
-
-The server is already prepared for observers: games keep their move list and an observer list, `Bu` and `Go` are sent to observers too, and a disconnecting observer is removed from its game.
 
 Unused codes: `Od` (replaced by `Go` with reason `left`) and `Sh` (`RG` would reply with its own type).
 
 ---
 
-## 10. What the server stores
+## 11. What the server stores
 
 All of this lives in `server_logic.c`, protected by one lock.
 
 **Account** (kept after disconnecting, at most 50)
 - player id, username, ELO rating: saved in `users.txt` as `id|username|rating`
 - friends (player ids, mutual): saved in `friends.txt` as `username|friend1|friend2...`
-- bio: memory only
+- bio and private mode: memory only
 - session index, or -1 if offline
 
 Both files are loaded when the server starts. Deleting them, with the server stopped, resets every account.
@@ -406,13 +466,13 @@ Both files are loaded when the server starts. Deleting them, with the server sto
 - a generation counter, increased on every new connection, so a message meant for a client who just left is never delivered to a new client reusing the same slot
 
 **Match** (one per running game, at most 25)
-- game id, the `Game` from `game.h`, the account on each side, the moves played, the observers
+- game id, the `Game` from `game.h`, the account on each side, the moves played (sent to new observers), the sessions of its observers (at most 10)
 
 ---
 
-## 11. Example scenarios
+## 12. Example scenarios
 
-### 11.1 Register, log in, list
+### 12.1 Register, log in, list
 
 ```
 alice -> R|-|-|0|alice          <- R|S|-|0|registered
@@ -421,7 +481,7 @@ alice -> L|-|-|0|alice          <- L|S|-|0|alice
 alice -> LO|-|-|0|              <- LO|S|-|0|alice:L,bob:L
 ```
 
-### 11.2 Challenge, game, resignation
+### 12.2 Challenge, game, resignation
 
 ```
 alice -> C|-|-|0|bob            <- alice: C|S|-|0|bob
@@ -439,7 +499,7 @@ alice -> Rs|-|P|0|              <- alice: Rs|S|P|0|
                                 <- bob:   Go|-|P|0|1 0 0 bob resign
 ```
 
-### 11.3 Challenge refused
+### 12.3 Challenge refused
 
 ```
 alice -> C|-|-|0|bob            <- alice: C|S|-|0|bob
@@ -448,8 +508,23 @@ bob   -> Rf|-|-|0|alice         <- bob:   Rf|S|-|0|alice
                                 <- alice: Rf|-|-|0|bob
 ```
 
-### 11.4 A player disconnects mid-game
+### 12.4 A player disconnects mid-game
 
 ```
 (alice's socket closes)         <- bob:   Go|-|P|0|1 12 9 bob left
+```
+
+### 12.5 Watching a private game
+
+alice is private and friends with dave. bob is public.
+
+```
+carol -> LG|-|-|0|              <- carol: LG|S|-|0|1:bob:alice:priv
+carol -> O|-|-|0|1              <- carol: O|F|O|0|game is private
+dave  -> O|-|-|0|1              <- dave:  O|S|O|0|1 bob alice 0,6
+bob   -> Mo|-|P|0|1             <- bob:   Mo|S|P|0|1
+                                <- bob:   Bu|-|P|0|1 1
+                                <- alice: Bu|-|P|0|1 1
+                                <- dave:  Bu|-|O|0|1 1
+dave  -> Ox|-|-|0|              <- dave:  Ox|S|-|0|
 ```
