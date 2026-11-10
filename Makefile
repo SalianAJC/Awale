@@ -1,4 +1,3 @@
-
 # ==========================================
 # COMPILER AND ENVIRONMENT
 # ==========================================
@@ -53,8 +52,11 @@ run: all
 run-server: $(SERVER)
 	$(RUN) $(PATH_PREFIX)$(SERVER)
 
+# Server address for the client: make run-client SERVER_IP=192.168.1.42
+SERVER_IP ?= 127.0.0.1
+
 run-client: $(CLIENT)
-	$(RUN) $(PATH_PREFIX)$(CLIENT)
+	$(RUN) $(PATH_PREFIX)$(CLIENT) $(SERVER_IP)
 
 # ==========================================
 # PROTOCOL TEST
@@ -148,7 +150,23 @@ test-e2e: $(E2E_BINS)
 	echo "All end-to-end tests passed."
 
 # Every test: protocol, server logic, end to end.
+# The network test is not included: it needs Linux (bash and Wine).
 test-all: test test-logic test-e2e
+
+# ==========================================
+# NETWORK TEST
+# ==========================================
+#
+# Starts the real server and runs the real client against it, through
+# 127.0.0.1 and through this machine's network address. Linux only.
+
+ifeq ($(OS),Windows_NT)
+test-network:
+	@echo "test-network needs Linux (bash and Wine). Skipped on Windows."
+else
+test-network: $(SERVER) $(CLIENT)
+	bash tests/test_network.sh
+endif
 
 # ==========================================
 # CLEAN
@@ -157,4 +175,4 @@ test-all: test test-logic test-e2e
 clean:
 	$(RM)
 
-.PHONY: all run run-server run-client test test-logic test-e2e test-all clean
+.PHONY: all run run-server run-client test test-logic test-e2e test-all test-network clean

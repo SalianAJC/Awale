@@ -2148,7 +2148,7 @@ int request_ranking(SOCKET client_socket)
     return 0;
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
     WSADATA wsa;
     SOCKET client_socket;
@@ -2178,7 +2178,21 @@ int main(void)
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+
+    const char *server_ip = (argc > 1) ? argv[1] : "127.0.0.1";
+
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    if (server_addr.sin_addr.s_addr == INADDR_NONE)
+    {
+        printf("Invalid server address: %s\n", server_ip);
+        closesocket(client_socket);
+        WSACleanup();
+        return 1;
+    }
+
+    printf("Connecting to %s:%d...\n", server_ip, SERVER_PORT);
 
     if (connect(client_socket, (struct sockaddr *)&server_addr,
                 sizeof(server_addr)) == SOCKET_ERROR)
