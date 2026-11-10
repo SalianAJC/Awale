@@ -18,6 +18,7 @@ typedef struct {
 
     //Game state, as the real client tracks it
     int in_game;
+    int observing;                  //watching a game (after a successful O)
     int game_id;
     int side;
     char opponent[MAX_NAME + 1];
@@ -27,6 +28,8 @@ typedef struct {
     int got_go;                     //number of Go messages
     char last_go[MAX_CONTENT + 1];
     int bu_count;                   //number of Bu applied
+    char last_bu_mode;              //mode of the last Bu (P for players, O for observers)
+    char last_go_mode;              //mode of the last Go
     int board_errors;               //Bu that could not be applied to the board
     int chat_count;
     char last_chat[MAX_CONTENT + 1];

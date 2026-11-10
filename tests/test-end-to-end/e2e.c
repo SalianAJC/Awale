@@ -70,11 +70,48 @@ static void deliver(void)
                 c->in_game = 1;
             }
         }
+        else if (strcmp(m->type, MSG_OBSERVE) == 0 && m->response == RESP_SUCCESS) {
+            //Start watching: fresh board, then replay the moves played so far
+            char side0[MAX_NAME + 1], side1[MAX_NAME + 1];
+            int consumed = 0;
+
+            if (sscanf(m->content, "%d %32s %32s%n", &c->game_id, side0, side1, &consumed) >= 3) {
+                init_game(&c->board);
+                c->observing = 1;
+
+                const char *p = m->content + consumed;
+
+                while (*p == ' ') {
+                    p++;
+                }
+
+                while (*p != '\0') {
+                    int hole = atoi(p);
+
+                    if (sow(&c->board, hole) != 0) {
+                        c->board_errors++;
+                    }
+
+                    while (*p != '\0' && *p != ',') {
+                        p++;
+                    }
+
+                    if (*p == ',') {
+                        p++;
+                    }
+                }
+            }
+        }
+        else if (strcmp(m->type, MSG_STOP_OBSERVE) == 0 && m->response == RESP_SUCCESS) {
+            c->observing = 0;
+        }
         else if (strcmp(m->type, MSG_BOARD_UPDATE) == 0) {
             int id, hole;
 
-            if (sscanf(m->content, "%d %d", &id, &hole) == 2 && c->in_game && id == c->game_id) {
+            if (sscanf(m->content, "%d %d", &id, &hole) == 2 &&
+                (c->in_game || c->observing) && id == c->game_id) {
                 c->bu_count++;
+                c->last_bu_mode = m->mode;
 
                 if (sow(&c->board, hole) != 0) {
                     c->board_errors++;
@@ -84,6 +121,8 @@ static void deliver(void)
         else if (strcmp(m->type, MSG_GAME_OVER) == 0) {
             c->got_go++;
             c->in_game = 0;
+            c->observing = 0;
+            c->last_go_mode = m->mode;
             snprintf(c->last_go, sizeof(c->last_go), "%s", m->content);
         }
         else if (strcmp(m->type, MSG_CHAT) == 0 && m->response == RESP_NONE) {
@@ -113,6 +152,7 @@ static int connect_client(Client *c)
 {
     c->session = logic_connect(&c->generation);
     c->in_game = 0;
+    c->observing = 0;
 
     if (c->session < 0) {
         return -1;
@@ -168,6 +208,7 @@ void e2e_leave(Client *c)
     //The client is gone: nothing more is delivered to it
     c->session = -100;
     c->in_game = 0;
+    c->observing = 0;
 }
 
 // ----------------------------------------------------------------

@@ -1,5 +1,6 @@
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <winsock2.h>
 #include <string.h>
 #include <conio.h> //Reads unentered data
@@ -9,6 +10,499 @@
 
 #include "network.h"
 #include "game.h"
+
+/* ============================================================
+   PRIVATE MODE
+   ============================================================ */
+
+int toggle_private(SOCKET client_socket)
+{
+    Message request = {0};
+    Message response;
+    char choice[16];
+
+    printf("Enable private mode? (on/off): ");
+
+    if (fgets(choice, sizeof(choice), stdin) == NULL)
+        return -1;
+
+    choice[strcspn(choice, "\r\n")] = '\0';
+
+    if (strcmp(choice, "on") != 0 &&
+        strcmp(choice, "off") != 0)
+    {
+        printf("Please enter 'on' or 'off'.\n");
+        return 0;
+    }
+
+    strcpy(request.type, MSG_PRIVATE);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    request.receiver = 0;
+    snprintf(request.content, sizeof(request.content), "%s", choice);
+
+    if (send_message(client_socket, &request) != 0)
+    {
+        printf("Failed to send private mode request.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, &response) != 0)
+    {
+        printf("Failed to receive private mode response.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_PRIVATE) != 0)
+    {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (response.response == RESP_SUCCESS)
+        printf("Private mode is now %s.\n", choice);
+    else
+        printf("Could not change private mode: %s\n", response.content);
+
+    return 0;
+}
+
+/* ============================================================
+   LIST ACTIVE GAMES
+   ============================================================ */
+
+int list_games(SOCKET client_socket)
+{
+    Message request = {0};
+    Message response;
+
+    strcpy(request.type, MSG_LIST_GAMES);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    request.receiver = 0;
+    request.content[0] = '\0';
+
+    if (send_message(client_socket, &request) != 0)
+    {
+        printf("Failed to request active games.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, &response) != 0)
+    {
+        printf("Failed to receive active games.\n");
+        return -1;
+    }
+
+    if (strcmp(response.type, MSG_LIST_GAMES) != 0)
+    {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (response.response != RESP_SUCCESS)
+    {
+        printf("Could not retrieve games: %s\n", response.content);
+        return 0;
+    }
+
+    printf("\n========== ACTIVE GAMES ==========\n");
+
+    if (response.content[0] == '\0')
+    {
+        printf("No games are currently being played.\n");
+        return 0;
+    }
+
+    char content[MAX_CONTENT + 1];
+    snprintf(content, sizeof(content), "%s", response.content);
+
+    char *entry = strtok(content, ",");
+
+    while (entry != NULL)
+    {
+        int id;
+        char player0[MAX_NAME + 1];
+        char player1[MAX_NAME + 1];
+        char visibility[8];
+
+        if (sscanf(entry, "%d:%32[^:]:%32[^:]:%7s",
+                   &id, player0, player1, visibility) == 4)
+        {
+            printf("Game %d: %s vs %s [%s]\n",
+                   id, player0, player1, visibility);
+        }
+        else
+        {
+            printf("Invalid game entry: %s\n", entry);
+        }
+
+        entry = strtok(NULL, ",");
+    }
+
+    printf("==================================\n");
+
+    return 0;
+}
+
+/* ============================================================
+   REQUEST TO OBSERVE A GAME
+   ============================================================ */
+
+int watch_request(SOCKET client_socket, Message *initial_state)
+{
+    Message request = {0};
+    char input[32];
+    char *end;
+    long game_id;
+
+    if (initial_state == NULL)
+        return -1;
+
+    printf("Enter the game ID you want to watch: ");
+
+    if (fgets(input, sizeof(input), stdin) == NULL)
+        return -1;
+
+    input[strcspn(input, "\r\n")] = '\0';
+
+    game_id = strtol(input, &end, 10);
+
+    if (input[0] == '\0' || *end != '\0' ||
+        game_id < 1 || game_id > 2147483647L)
+    {
+        printf("Invalid game ID.\n");
+        return 0;
+    }
+
+    strcpy(request.type, MSG_OBSERVE);
+    request.response = RESP_NONE;
+    request.mode = MODE_NONE;
+    request.receiver = 0;
+
+    snprintf(request.content, sizeof(request.content),
+             "%ld", game_id);
+
+    if (send_message(client_socket, &request) != 0)
+    {
+        printf("Failed to send observation request.\n");
+        return -1;
+    }
+
+    if (receive_message(client_socket, initial_state) != 0)
+    {
+        printf("Failed to receive observation response.\n");
+        return -1;
+    }
+
+    if (strcmp(initial_state->type, MSG_OBSERVE) != 0)
+    {
+        printf("Unexpected server response.\n");
+        return -1;
+    }
+
+    if (initial_state->response != RESP_SUCCESS)
+    {
+        printf("Cannot watch this game: %s\n",
+               initial_state->content);
+        return 0;
+    }
+
+    if (initial_state->mode != MODE_OBSERVER)
+    {
+        printf("Invalid observer response mode.\n");
+        return -1;
+    }
+
+    return 1;
+}
+
+/* ============================================================
+   OBSERVER: PARSE ONE SPACE-SEPARATED TOKEN
+   ============================================================ */
+
+static int observer_read_token(char **cursor,
+                               char *destination,
+                               size_t destination_size)
+{
+    size_t length = 0;
+
+    while (**cursor == ' ')
+        (*cursor)++;
+
+    if (**cursor == '\0')
+        return 0;
+
+    while (**cursor != '\0' && **cursor != ' ')
+    {
+        if (length + 1 >= destination_size)
+            return 0;
+
+        destination[length++] = **cursor;
+        (*cursor)++;
+    }
+
+    destination[length] = '\0';
+    return 1;
+}
+
+/* ============================================================
+   OBSERVER: REPLAY THE MOVE HISTORY
+   ============================================================ */
+
+static int replay_observer_moves(Game *game, char *moves)
+{
+    if (moves == NULL || moves[0] == '\0')
+        return 0;
+
+    char *token = strtok(moves, ",");
+
+    while (token != NULL)
+    {
+        char *end;
+        long hole = strtol(token, &end, 10);
+
+        if (token[0] == '\0' || *end != '\0' ||
+            hole < 0 || hole > 11)
+        {
+            printf("Invalid move in game history: %s\n", token);
+            return -1;
+        }
+
+        if (sow(game, (int)hole) != 0)
+        {
+            printf("Could not replay move %ld.\n", hole);
+            return -1;
+        }
+
+        token = strtok(NULL, ",");
+    }
+
+    return 0;
+}
+
+/* ============================================================
+   OBSERVE A GAME
+   ============================================================ */
+
+int observe_game(SOCKET client_socket, const Message *initial_state)
+{
+    Game game;
+    char content[MAX_CONTENT + 1];
+    char player0[MAX_NAME + 1];
+    char player1[MAX_NAME + 1];
+    char move_history[MAX_CONTENT + 1];
+    char *cursor;
+    char game_id_text[16];
+    char *end;
+    long game_id;
+    int stop_requested = 0;
+
+    if (initial_state == NULL)
+        return -1;
+
+    /*
+     * Expected server content:
+     *
+     * game_id player0 player1 move1,move2,move3,...
+     *
+     * The move list can be empty.
+     */
+
+    snprintf(content, sizeof(content), "%s", initial_state->content);
+    cursor = content;
+
+    if (!observer_read_token(&cursor,
+                             game_id_text,
+                             sizeof(game_id_text)) ||
+        !observer_read_token(&cursor,
+                             player0,
+                             sizeof(player0)) ||
+        !observer_read_token(&cursor,
+                             player1,
+                             sizeof(player1)))
+    {
+        printf("Invalid initial observer state.\n");
+        return -1;
+    }
+
+    game_id = strtol(game_id_text, &end, 10);
+
+    if (*end != '\0' || game_id < 1 || game_id > 2147483647L)
+    {
+        printf("Invalid game ID in observer state.\n");
+        return -1;
+    }
+
+    while (*cursor == ' ')
+        cursor++;
+
+    snprintf(move_history, sizeof(move_history), "%s", cursor);
+
+    init_game(&game);
+    game.id = (int)game_id;
+
+    if (replay_observer_moves(&game, move_history) != 0)
+    {
+        printf("Could not reconstruct the current board.\n");
+        return -1;
+    }
+
+    printf("\n========== OBSERVING GAME %d ==========\n", game.id);
+    printf("%s vs %s\n", player0, player1);
+    printf("You are an observer. You cannot play moves.\n");
+    printf("Press Q to stop observing.\n\n");
+
+    print_board(&game);
+
+    while (1)
+    {
+        fd_set readfds;
+        struct timeval timeout;
+
+        FD_ZERO(&readfds);
+        FD_SET(client_socket, &readfds);
+
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000;
+
+        int socket_status = select(
+            0,
+            &readfds,
+            NULL,
+            NULL,
+            &timeout);
+
+        if (socket_status == -1)
+        {
+            printf("\nConnection lost while observing.\n");
+            return -1;
+        }
+
+        if (socket_status == 1)
+        {
+            Message incoming = {0};
+
+            if (receive_message(client_socket, &incoming) != 0)
+            {
+                printf("\nFailed to receive observer update.\n");
+                return -1;
+            }
+
+            /* A new move was played. */
+            if (strcmp(incoming.type, MSG_BOARD_UPDATE) == 0 &&
+                incoming.mode == MODE_OBSERVER)
+            {
+                int received_game;
+                int hole;
+
+                if (sscanf(incoming.content, "%d %d",
+                           &received_game, &hole) != 2)
+                {
+                    printf("Invalid observer board update.\n");
+                    return -1;
+                }
+
+                if (received_game != game.id)
+                    continue;
+
+                if (sow(&game, hole) != 0)
+                {
+                    printf("Observer board synchronization error.\n");
+                    return -1;
+                }
+
+                printf("\n--- New move: hole %d ---\n", hole);
+                print_board(&game);
+            }
+
+            else if (strcmp(incoming.type, MSG_CHAT) == 0)
+            {
+                printf("[CHAT] %s\n", incoming.content);
+            }
+
+            /* The observed game has ended. */
+            else if (strcmp(incoming.type, MSG_GAME_OVER) == 0 &&
+                     incoming.mode == MODE_OBSERVER)
+            {
+                int received_game;
+                int captures0;
+                int captures1;
+                char winner[MAX_NAME + 1];
+                char reason[32];
+
+                if (sscanf(incoming.content,
+                           "%d %d %d %32s %31s",
+                           &received_game,
+                           &captures0,
+                           &captures1,
+                           winner,
+                           reason) != 5)
+                {
+                    printf("Invalid game result.\n");
+                    return -1;
+                }
+
+                if (received_game != game.id)
+                    continue;
+
+                printf("\n========== GAME OVER ==========\n");
+                printf("Player 0: %d seeds\n", captures0);
+                printf("Player 1: %d seeds\n", captures1);
+
+                if (strcmp(winner, "draw") == 0)
+                    printf("The game ended in a draw.\n");
+                else
+                    printf("Winner: %s\n", winner);
+
+                printf("Reason: %s\n", reason);
+                printf("Returning to lobby.\n");
+
+                return 1;
+            }
+
+            /* The server acknowledged our request to stop. */
+            else if (strcmp(incoming.type, MSG_STOP_OBSERVE) == 0)
+            {
+                if (incoming.response == RESP_SUCCESS)
+                {
+                    printf("\nStopped observing.\n");
+                    return 1;
+                }
+
+                printf("Could not stop observing: %s\n",
+                       incoming.content);
+                stop_requested = 0;
+            }
+        }
+
+        /* Q requests that the server remove this observer. */
+        if (!stop_requested && _kbhit())
+        {
+            int ch = _getch();
+
+            if (ch == 'q' || ch == 'Q')
+            {
+                Message request = {0};
+
+                strcpy(request.type, MSG_STOP_OBSERVE);
+                request.response = RESP_NONE;
+                request.mode = MODE_OBSERVER;
+                request.receiver = 0;
+                request.content[0] = '\0';
+
+                if (send_message(client_socket, &request) != 0)
+                {
+                    printf("Failed to send stop-observing request.\n");
+                    return -1;
+                }
+
+                stop_requested = 1;
+                printf("\nStopping observation...\n");
+            }
+        }
+    }
+}
 
 int register_acc(SOCKET client_socket)
 {
@@ -1117,8 +1611,7 @@ int read_bio(SOCKET client_socket)
     }
     putchar('\n');
 
-    printf("Could not retrieve bio: %s\n", response.content);
-    return -1;
+    return 0;
 }
 
 // Adding a friend
@@ -1381,7 +1874,10 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
         printf("7. Show friends\n");
         printf("8. Chat with a player\n");
         printf("9. Show player ranking\n");
-        printf("10. Quit\n");
+        printf("10. Toggle private mode\n");
+        printf("11. List active games\n");
+        printf("12. Watch a game\n");
+        printf("13. Quit\n");
         printf("Choose an option: ");
 
         lobby_status = read_lobby_choice(choice, sizeof(choice), client_socket, &game_start);
@@ -1492,6 +1988,33 @@ int lobby_menu(SOCKET client_socket, int *game_id, int *side, char *opponent, in
             show_ranking(client_socket);
         }
         else if (strcmp(choice, "10") == 0)
+        {
+            toggle_private(client_socket);
+        }
+        else if (strcmp(choice, "11") == 0)
+        {
+            list_games(client_socket);
+        }
+        else if (strcmp(choice, "12") == 0)
+        {
+            Message initial_state = {0};
+
+            int status = watch_request(client_socket, &initial_state);
+
+            if (status == 1)
+            {
+                int observe_status =
+                    observe_game(client_socket, &initial_state);
+
+                if (observe_status == -1)
+                    return 0;
+            }
+            else if (status == -1)
+            {
+                return 0;
+            }
+        }
+        else if (strcmp(choice, "13") == 0)
         {
             return 0;
         }
@@ -1611,7 +2134,8 @@ int request_ranking(SOCKET client_socket)
         int rating;
 
         if (sscanf(entry, "%" STRINGIFY(MAX_NAME) "[^:]:%d",
-           username, &rating) == 2){
+                   username, &rating) == 2)
+        {
             printf("%-5d %-20s %d\n", rank, username, rating);
             rank++;
         }

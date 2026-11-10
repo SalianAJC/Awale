@@ -189,6 +189,123 @@ static int find_match_by_game_id(int id)
     return -1;
 }
 
+
+// Returns 1 if 'other' is in 'owner's friend list.
+static int is_friend(int owner, int other)
+{
+    if (owner < 0 || owner >= account_count ||
+        other < 0 || other >= account_count)
+    {
+        return 0;
+    }
+
+    int other_id = accounts[other].player_id;
+
+    for (int i = 0; i < MAX_FRIENDS; i++)
+    {
+        if (accounts[owner].friends_ids[i] == other_id)
+            return 1;
+    }
+
+    return 0;
+}
+
+// Returns 1 if viewer is allowed to watch player.
+static int may_watch(int viewer, int player)
+{
+    if (viewer < 0 || viewer >= account_count ||
+        player < 0 || player >= account_count)
+    {
+        return 0;
+    }
+
+    // A player can always watch their own game.
+    if (viewer == player)
+        return 1;
+
+    // Public players can be watched by everyone.
+    if (!accounts[player].private_mode)
+        return 1;
+
+    // Private players can only be watched by friends.
+    return is_friend(player, viewer);
+}
+
+// Returns 1 if at least one player has private mode enabled.
+static int is_match_private(int m)
+{
+    if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
+        return 1;
+
+    int a = matches[m].side_account[0];
+    int b = matches[m].side_account[1];
+
+    if (a < 0 || a >= account_count ||
+        b < 0 || b >= account_count)
+    {
+        return 1;
+    }
+
+    return accounts[a].private_mode || accounts[b].private_mode;
+}
+
+// Builds a comma-separated list of moves, e.g. "2,7,5".
+static void build_move_list(int m, char *buffer, size_t size)
+{
+    if (buffer == NULL || size == 0)
+        return;
+
+    buffer[0] = '\0';
+
+    if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
+        return;
+
+    size_t used = 0;
+
+    for (int i = 0; i < matches[m].move_count; i++)
+    {
+        char entry[16];
+
+        int written = snprintf(
+            entry,
+            sizeof(entry),
+            "%s%d",
+            i > 0 ? "," : "",
+            matches[m].moves[i]
+        );
+
+        if (written < 0 || (size_t)written >= sizeof(entry))
+            break;
+
+        if ((size_t)written >= size - used)
+            break;
+
+        memcpy(buffer + used, entry, (size_t)written);
+        used += (size_t)written;
+        buffer[used] = '\0';
+    }
+}
+
+// Removes a session from a match's observer list.
+static void remove_observer(int m, int session)
+{
+    if (m < 0 || m >= MAX_GAMES || !matches[m].in_use)
+        return;
+
+    for (int i = 0; i < matches[m].observer_count; i++)
+    {
+        if (matches[m].observers[i] == session)
+        {
+            // Fill the empty slot with the last observer.
+            matches[m].observers[i] =
+                matches[m].observers[matches[m].observer_count - 1];
+
+            matches[m].observer_count--;
+            return;
+        }
+    }
+}
+
 // ---------- Outbox ----------
 
 // Adds a message for a session, stamped with its current generation.
@@ -1707,6 +1824,191 @@ static void handle_ranking(int session,
         ranking
     );
 }
+
+// Pv: Enable or disable private mode.
+static void handle_private(int session,
+                           const Message *request,
+                           Outbox *outbox)
+{
+    int me = sessions[session].account_index;
+
+    if (strcmp(request->content, "on") == 0)
+    {
+        accounts[me].private_mode = 1;
+
+        reply(outbox, session, MSG_PRIVATE,
+              RESP_SUCCESS, "on");
+    }
+    else if (strcmp(request->content, "off") == 0)
+    {
+        accounts[me].private_mode = 0;
+
+        reply(outbox, session, MSG_PRIVATE,
+              RESP_SUCCESS, "off");
+    }
+    else
+    {
+        reply(outbox, session, MSG_PRIVATE,
+              RESP_FAILURE, "bad format");
+    }
+}
+
+// LG: List all active games.
+static void handle_list_games(int session,
+                              const Message *request,
+                              Outbox *outbox)
+{
+    (void)request;
+
+    char list[MAX_CONTENT + 1] = "";
+    size_t used = 0;
+
+    for (int m = 0; m < MAX_GAMES; m++)
+    {
+        if (!matches[m].in_use)
+            continue;
+
+        int a = matches[m].side_account[0];
+        int b = matches[m].side_account[1];
+
+        if (a < 0 || a >= account_count ||
+            b < 0 || b >= account_count)
+        {
+            continue;
+        }
+
+        char entry[MAX_NAME * 2 + 40];
+
+        int written = snprintf(
+            entry,
+            sizeof(entry),
+            "%s%d:%s:%s:%s",
+            used > 0 ? "," : "",
+            matches[m].game_id,
+            accounts[a].username,
+            accounts[b].username,
+            is_match_private(m) ? "priv" : "pub"
+        );
+
+        if (written < 0 || (size_t)written >= sizeof(entry))
+            break;
+
+        if ((size_t)written >= sizeof(list) - used)
+            break;
+
+        memcpy(list + used, entry, (size_t)written);
+        used += (size_t)written;
+        list[used] = '\0';
+    }
+
+    reply(outbox, session, MSG_LIST_GAMES,
+          RESP_SUCCESS, list);
+}
+
+// O: Start observing an existing game.
+static void handle_observe(int session,
+                           const Message *request,
+                           Outbox *outbox)
+{
+    int me = sessions[session].account_index;
+    int game_id;
+    int m;
+
+    // 1. Validate the game ID.
+    if (parse_int(request->content, 1, INT_MAX, &game_id) != 0)
+    {
+        send_to(outbox, session, MSG_OBSERVE,
+                MODE_OBSERVER, RESP_FAILURE, "bad format");
+        return;
+    }
+
+    // 2. Find the match using its public game ID.
+    m = find_match_by_game_id(game_id);
+
+    if (m == -1)
+    {
+        send_to(outbox, session, MSG_OBSERVE,
+                MODE_OBSERVER, RESP_FAILURE, "no such game");
+        return;
+    }
+
+    int a = matches[m].side_account[0];
+    int b = matches[m].side_account[1];
+
+    // 3. Check both players' privacy settings.
+    if (!may_watch(me, a) || !may_watch(me, b))
+    {
+        send_to(outbox, session, MSG_OBSERVE,
+                MODE_OBSERVER, RESP_FAILURE, "game is private");
+        return;
+    }
+
+    // 4. Check observer capacity.
+    if (matches[m].observer_count >= MAX_OBSERVERS)
+    {
+        send_to(outbox, session, MSG_OBSERVE,
+                MODE_OBSERVER, RESP_FAILURE, "game full");
+        return;
+    }
+
+    // Register the observer.
+    matches[m].observers[matches[m].observer_count++] = session;
+
+    sessions[session].state = STATE_OBSERVING;
+    sessions[session].match_index = m;
+
+    // Build the move history.
+    char moves[MAX_CONTENT + 1];
+    char content[MAX_CONTENT + 1];
+
+    build_move_list(m, moves, sizeof(moves));
+
+    // Initial state:
+    // game_id side0_username side1_username move1,move2,...
+    int written = snprintf(
+        content,
+        sizeof(content),
+        "%d %s %s %s",
+        matches[m].game_id,
+        accounts[a].username,
+        accounts[b].username,
+        moves
+    );
+
+    if (written < 0 || (size_t)written >= sizeof(content))
+    {
+        // Roll back observer registration if the initial state won't fit.
+        remove_observer(m, session);
+        sessions[session].state = STATE_LOBBY;
+        sessions[session].match_index = -1;
+
+        send_to(outbox, session, MSG_OBSERVE,
+                MODE_OBSERVER, RESP_FAILURE, "game data too large");
+        return;
+    }
+
+    send_to(outbox, session, MSG_OBSERVE,
+            MODE_OBSERVER, RESP_SUCCESS, content);
+}
+
+// Ox: Stop observing a game and return to the lobby.
+static void handle_stop_observe(int session,
+                                const Message *request,
+                                Outbox *outbox)
+{
+    (void)request;
+
+    int m = sessions[session].match_index;
+
+    remove_observer(m, session);
+
+    sessions[session].state = STATE_LOBBY;
+    sessions[session].match_index = -1;
+
+    reply(outbox, session, MSG_STOP_OBSERVE,
+          RESP_SUCCESS, "");
+}
+
 // ================================================================
 // 4. MESSAGE TABLE
 // ================================================================
@@ -1762,6 +2064,12 @@ static const MessageRule message_table[] = {
     // Bio
     {MSG_WRITE_BIO, ALLOW_LOGGED_IN, handle_write_bio},
     {MSG_READ_BIO, ALLOW_LOGGED_IN, handle_read_bio},
+
+    //Observe and Private
+    {MSG_PRIVATE, ALLOW_LOGGED_IN, handle_private},
+    {MSG_LIST_GAMES, ALLOW_LOGGED_IN, handle_list_games},
+    {MSG_OBSERVE, ALLOW_LOBBY, handle_observe},
+    {MSG_STOP_OBSERVE, ALLOW_OBSERVING, handle_stop_observe},
 
     //Elo
     {MSG_RANKING, ALLOW_LOGGED_IN, handle_ranking },
@@ -1970,25 +2278,10 @@ void logic_disconnect(int session_index, Outbox *outbox)
             end_match(outbox, m, winner, "left", session_index);
         }
     }
-    // If the player is observing, remove them from the match.
+        // If the player is observing, remove them from the match.
     else if (session->state == STATE_OBSERVING)
     {
-        int m = session->match_index;
-
-        if (m >= 0 && m < MAX_GAMES && matches[m].in_use)
-        {
-            for (int i = 0; i < matches[m].observer_count; i++)
-            {
-                if (matches[m].observers[i] == session_index)
-                {
-                    matches[m].observers[i] =
-                        matches[m].observers[matches[m].observer_count - 1];
-
-                    matches[m].observer_count--;
-                    break;
-                }
-            }
-        }
+        remove_observer(session->match_index, session_index);
     }
 
     // Mark the account offline, but keep the account itself.
